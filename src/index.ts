@@ -12,7 +12,6 @@ import { responseTime } from './middleware/responseTime';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Rate limiter
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -29,7 +28,6 @@ app.use(responseTime);
 app.use(globalTimeout);
 app.use(haltOnTimedout);
 
-// Basic health check
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
@@ -44,7 +42,6 @@ app.use("/admin/queues", queueRouter);
 app.use(timeoutErrorHandler);
 app.use(errorHandler);
 
-// Init Redis
 connectRedis()
   .then(() => {
     console.log("Redis initialized");
@@ -55,4 +52,5 @@ connectRedis()
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  startJobs();
 });
