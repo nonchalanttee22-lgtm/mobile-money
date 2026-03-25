@@ -53,3 +53,18 @@ ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id);
 
 CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_user_created ON transactions(user_id, created_at);
+
+-- Idempotency support for safe client retries.
+ALTER TABLE transactions
+ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);
+
+ALTER TABLE transactions
+ADD COLUMN IF NOT EXISTS idempotency_expires_at TIMESTAMP;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_idempotency_key
+  ON transactions(idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_transactions_idempotency_expires_at
+  ON transactions(idempotency_expires_at)
+  WHERE idempotency_expires_at IS NOT NULL;
