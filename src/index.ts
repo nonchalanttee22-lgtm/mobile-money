@@ -4,16 +4,33 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 
+// API Versioning
+import {
+  apiVersionMiddleware,
+  validateVersionMiddleware,
+  VersionedRequest,
+} from "./middleware/apiVersion";
+
+// V1 Routes
+import {
+  transactionRoutesV1,
+  bulkRoutesV1,
+  transactionDisputeRoutesV1,
+  disputeRoutesV1,
+  statsRoutesV1,
+} from "./routes/v1";
+
+// Legacy routes (for backward compatibility)
 import { transactionRoutes } from "./routes/transactions";
 import { bulkRoutes } from "./routes/bulk";
 import { transactionDisputeRoutes, disputeRoutes } from "./routes/disputes";
 import { statsRoutes } from "./routes/stats";
+
 import { errorHandler } from "./middleware/errorHandler";
 import { connectRedis, redisClient } from "./config/redis";
 import { pool } from "./config/database";
 import { globalTimeout, haltOnTimedout, timeoutErrorHandler } from "./middleware/timeout";
 import { responseTime } from "./middleware/responseTime";
-import { createQueueDashboard, getQueueHealth, pauseQueueEndpoint, resumeQueueEndpoint } from "./queue";
 import {
   createQueueDashboard,
   getQueueHealth,
@@ -120,8 +137,34 @@ app.get("/ready", async (req, res) => {
 app.use(globalTimeout);
 app.use(haltOnTimedout);
 
-// Routes
-app.use("/api/transactions", transactionRoutes);
+// API Versioning middleware
+app.use(apiVersionMiddleware);
+app.use(validateVersionMiddleware);
+
+/**
+ * Versioned Routes
+ * Routes are now under /api/v1/ prefix
+ */
+
+// V1 Routes
+app.use("/api/v1/transactions", transactionRoutesV1);
+app.use("/api/v1/transactions", transactionDisputeRoutesV1);
+app.use("/api/v1/transactions/bulk", bulkRoutesV1);
+app.use("/api/v1/disputes", disputeRoutesV1);
+app.use("/api/v1/stats", statsRoutesV1);
+
+/**
+ * Legacy Routes (Backward Compatibility)
+ * Automatically redirect to v1 routes for backward compatibility
+ */
+app.use("/api/transactions", (req: VersionedRequest, res, next) => {
+  req.apiVersion = "v1";
+  res.setHeader("API-Version", "v1");
+  res.setHeader("Deprecation", "true");
+  res.setHeader("Sunset", new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toUTCString());
+  res.setHeader('Url', `https://example.com${req.originalUrl.replace("/api/", "/api/v1/")}`);
+  next();
+}, transactionRoutes);
 app.use("/api/transactions", transactionDisputeRoutes);
 app.use("/api/transactions/bulk", bulkRoutes);
 app.use("/api/disputes", disputeRoutes);

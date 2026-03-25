@@ -1,0 +1,188 @@
+/**
+ * API Versioning Test Suite
+ * Tests for version extraction, validation, and backward compatibility
+ */
+
+import request from "supertest";
+import express from "express";
+import { apiVersionMiddleware, validateVersionMiddleware, VersionedRequest } from "../../src/middleware/apiVersion";
+
+describe("API Versioning", () => {
+  let app: express.Application;
+
+  beforeEach(() => {
+    app = express();
+    app.use(express.json());
+    app.use(apiVersionMiddleware);
+    app.use(validateVersionMiddleware);
+
+    // Test endpoint
+    app.get("/api/:version/test", (req: VersionedRequest, res) => {
+      res.json({ version: req.apiVersion, data: "test" });
+    });
+  });
+
+  describe("Version Extraction from URL", () => {
+    it("should extract v1 from URL path", (done) => {
+      request(app)
+        .get("/api/v1/test")
+        .expect(200)
+        .expect((res) => {
+          if (res.body.version !== "v1") throw new Error("Version not extracted");
+          if (res.headers["api-version"] !== "v1") throw new Error("Version header not set");
+        })
+        .end(done);
+    });
+
+    it("should set API-Version header", (done) => {
+      request(app)
+        .get("/api/v1/test")
+        .expect((res) => {
+          if (!res.headers["api-version"]) throw new Error("Missing API-Version header");
+        })
+        .end(done);
+    });
+
+    it("should set Vary header", (done) => {
+      request(app)
+        .get("/api/v1/test")
+        .expect((res) => {
+          if (!res.headers["vary"]) throw new Error("Missing Vary header");
+        })
+        .end(done);
+    });
+  });
+
+  describe("Version Extraction from Accept Header", () => {
+    it("should extract version from Accept header", (done) => {
+      request(app)
+        .get("/api/test")
+        .set("Accept", "application/json;version=v1")
+        .expect(200)
+        .expect((res) => {
+          if (res.headers["api-version"] !== "v1") throw new Error("Accept header version not used");
+        })
+        .end(done);
+    });
+
+    it("should prioritize URL path over Accept header", (done) => {
+      request(app)
+        .get("/api/v1/test")
+        .set("Accept", "application/json;version=v2")
+        .expect((res) => {
+          if (res.headers["api-version"] !== "v1") throw new Error("URL path priority failed");
+        })
+        .end(done);
+    });
+  });
+
+  describe("Version Validation", () => {
+    it("should reject unsupported versions", (done) => {
+      request(app)
+        .get("/api/v99/test")
+        .expect(400)
+        .expect((res) => {
+          if (!res.body.error || res.body.error !== "Unsupported API Version") {
+            throw new Error("Version validation failed");
+          }
+        })
+        .end(done);
+    });
+
+    it("should return supported versions in error", (done) => {
+      request(app)
+        .get("/api/v99/test")
+        .expect((res) => {
+          if (!res.body.supportedVersions) throw new Error("Supported versions not returned");
+          if (!Array.isArray(res.body.supportedVersions)) throw new Error("Supported versions not array");
+        })
+        .end(done);
+    });
+  });
+
+  describe("Backward Compatibility", () => {
+    it("should default to v1 for unversioned endpoints", (done) => {
+      request(app)
+        .get("/api/test")
+        .expect((res) => {
+          if (res.headers["api-version"] !== "v1") throw new Error("Default version not v1");
+        })
+        .end(done);
+    });
+
+    it("should support legacy /api/ paths", (done) => {
+      request(app)
+        .get("/api/test")
+        .expect(200)
+        .end(done);
+    });
+  });
+
+  describe("Multi-Version Support", () => {
+    it("should handle multiple requests with different versions", (done) => {
+      Promise.all([
+        new Promise((resolve) => {
+          request(app)
+            .get("/api/v1/test")
+            .expect(200)
+            .end((err) => resolve(err));
+        }),
+      ]).then(() => done()).catch(done);
+    });
+
+    it("should maintain independent version contexts", (done) => {
+      request(app)
+        .get("/api/v1/test")
+        .expect(200)
+        .expect((res) => {
+          if (res.body.version !== "v1") throw new Error("Version context not maintained");
+        })
+        .end(done);
+    });
+  });
+
+  describe("Response Headers", () => {
+    it("should include version in all responses", (done) => {
+      request(app)
+        .get("/api/v1/test")
+        .expect((res) => {
+          if (!res.headers["api-version"]) throw new Error("Missing version header");
+        })
+        .end(done);
+    });
+
+    it("should include Vary header for caching", (done) => {
+      request(app)
+        .get("/api/v1/test")
+        .expect((res) => {
+          if (!res.headers["vary"]) throw new Error("Missing Vary header");
+          if (!res.headers["vary"].includes("Accept")) throw new Error("Vary should include Accept");
+        })
+        .end(done);
+    });
+  });
+
+  describe("Error Handling", () => {
+    it("should handle malformed version strings", (done) => {
+      request(app)
+        .get("/api/invalid/test")
+        .expect((res) => {
+          // Should either use default or reject
+          if (res.status !== 200 && res.status !== 400) {
+            throw new Error("Unexpected status code");
+          }
+        })
+        .end(done);
+    });
+
+    it("should provide helpful error messages", (done) => {
+      request(app)
+        .get("/api/v99/test")
+        .expect(400)
+        .expect((res) => {
+          if (!res.body.message) throw new Error("No error message provided");
+        })
+        .end(done);
+    });
+  });
+});

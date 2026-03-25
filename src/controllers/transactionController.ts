@@ -338,3 +338,45 @@ export const searchTransactionsHandler = async (
     res.status(500).json({ error: "Search failed" });
   }
 };
+
+/**
+ * List transactions with status filtering and pagination
+ * Supports: ?status=pending or ?status=pending,completed&limit=50&offset=0
+ */
+export const listTransactionsHandler = async (req: Request, res: Response) => {
+  try {
+    const filters = (req as any).transactionFilters || {
+      statuses: [],
+      limit: 50,
+      offset: 0,
+    };
+
+    // Get total count
+    const totalCount = await transactionModel.countByStatuses(filters.statuses);
+
+    // Get paginated transactions
+    const transactions = await transactionModel.findByStatuses(
+      filters.statuses,
+      filters.limit,
+      filters.offset,
+    );
+
+    res.json({
+      data: transactions,
+      pagination: {
+        total: totalCount,
+        limit: filters.limit,
+        offset: filters.offset,
+        hasMore: filters.offset + filters.limit < totalCount,
+        totalPages: Math.ceil(totalCount / filters.limit),
+        currentPage: Math.floor(filters.offset / filters.limit) + 1,
+      },
+      filters: {
+        statuses: filters.statuses,
+      },
+    });
+  } catch (err) {
+    console.error("Failed to list transactions:", err);
+    res.status(500).json({ error: "Failed to list transactions" });
+  }
+};

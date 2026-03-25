@@ -199,4 +199,56 @@ export class TransactionModel {
     );
     return result.rows;
   }
+
+  /**
+   * Find transactions by status(es) with pagination.
+   * @param statuses - Array of transaction statuses to filter by (empty array = all statuses)
+   * @param limit - Number of results per page (max 100)
+   * @param offset - Number of results to skip
+   * @returns Array of transactions ordered by created_at DESC
+   */
+  async findByStatuses(
+    statuses: TransactionStatus[] = [],
+    limit = 50,
+    offset = 0,
+  ): Promise<Transaction[]> {
+    const capped = Math.min(Math.max(limit, 1), 100);
+    const off = Math.max(offset, 0);
+
+    if (statuses.length === 0) {
+      // No filter, return all
+      const result = await pool.query(
+        "SELECT * FROM transactions ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+        [capped, off],
+      );
+      return result.rows;
+    }
+
+    // Filter by statuses
+    const result = await pool.query(
+      "SELECT * FROM transactions WHERE status = ANY($1) ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+      [statuses, capped, off],
+    );
+    return result.rows;
+  }
+
+  /**
+   * Count transactions by status(es).
+   * @param statuses - Array of transaction statuses to filter by (empty array = all statuses)
+   * @returns Total count of matching transactions
+   */
+  async countByStatuses(statuses: TransactionStatus[] = []): Promise<number> {
+    if (statuses.length === 0) {
+      const result = await pool.query(
+        "SELECT COUNT(*) FROM transactions",
+      );
+      return parseInt(result.rows[0].count, 10);
+    }
+
+    const result = await pool.query(
+      "SELECT COUNT(*) FROM transactions WHERE status = ANY($1)",
+      [statuses],
+    );
+    return parseInt(result.rows[0].count, 10);
+  }
 }

@@ -5,8 +5,10 @@ import {
   getTransactionHandler,
   updateNotesHandler,
   searchTransactionsHandler,
+  listTransactionsHandler,
 } from "../controllers/transactionController";
 import { TimeoutPresets, haltOnTimedout } from "../middleware/timeout";
+import { validateTransactionFilters } from "../utils/transactionFilters";
 
 export const transactionRoutes = Router();
 
@@ -26,6 +28,15 @@ transactionRoutes.post(
   haltOnTimedout,
   validateTransaction,
   withdrawHandler
+);
+
+// List transactions with status filtering and pagination
+transactionRoutes.get(
+  "/",
+  TimeoutPresets.quick,
+  haltOnTimedout,
+  validateTransactionFilters,
+  listTransactionsHandler,
 );
 
 // Quick read operation
