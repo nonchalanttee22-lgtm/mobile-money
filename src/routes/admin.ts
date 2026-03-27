@@ -5,6 +5,11 @@ import {
   validateDashboardConfig,
   DASHBOARD_CONFIG_VALIDATION_ERRORS,
 } from "../utils/dashboardConfig";
+import {
+  rateLimitExport,
+  rateLimitListQueries,
+  RATE_LIMIT_CONFIG,
+} from "../middleware/rateLimit";
 import { MobileMoneyService } from "../services/mobilemoney/mobileMoneyService";
 import { getQueueStats } from "../queue/transactionQueue";
 import { redisClient } from "../config/redis";
@@ -93,6 +98,7 @@ const paginate = <T>(data: T[], page: number, limit: number) => {
 router.get(
   "/users",
   requireAdmin,
+  rateLimitListQueries,
   logAdminAction("LIST_USERS"),
   (req: Request, res: Response) => {
     const page = Number(req.query.page) || 1;
@@ -244,6 +250,7 @@ router.get(
 router.put(
   "/transactions/:id",
   requireAdmin,
+  rateLimitListQueries,
   logAdminAction("UPDATE_TRANSACTION"),
   (req: Request, res: Response) => {
     const tx = transactions.find((t) => t.id === req.params.id);
@@ -266,7 +273,6 @@ router.patch(
   updateAdminNotesHandler,
 );
 
-export const adminRoutes = router;
 /**
  * =========================
  * HEALTH & MONITORING
@@ -351,6 +357,65 @@ router.get(
         timestamp: new Date().toISOString(),
       });
     }
+  },
+);
+
+/**
+ * =========================
+ * DATA EXPORT
+ * =========================
+ */
+
+// POST /api/admin/export/users
+router.post(
+  "/export/users",
+  requireAdmin,
+  rateLimitExport,
+  logAdminAction("EXPORT_USERS"),
+  (req: Request, res: Response) => {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+
+    const result = paginate(users, page, limit);
+
+    // Set export headers
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", 'attachment; filename="users-export.json"');
+
+    res.json({
+      exportedAt: new Date().toISOString(),
+      exportedBy: (req as AuthRequest).user?.id,
+      dataType: "users",
+      ...result,
+    });
+  },
+);
+
+// POST /api/admin/export/transactions
+router.post(
+  "/export/transactions",
+  requireAdmin,
+  rateLimitExport,
+  logAdminAction("EXPORT_TRANSACTIONS"),
+  (req: Request, res: Response) => {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+
+    const result = paginate(transactions, page, limit);
+
+    // Set export headers
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="transactions-export.json"',
+    );
+
+    res.json({
+      exportedAt: new Date().toISOString(),
+      exportedBy: (req as AuthRequest).user?.id,
+      dataType: "transactions",
+      ...result,
+    });
   },
 );
 
