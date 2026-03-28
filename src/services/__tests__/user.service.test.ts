@@ -84,5 +84,20 @@ describe("deactivateUserAccount", () => {
       expect(query).toContain("is_active = false");
       expect(query).toContain("deactivated_at = CURRENT_TIMESTAMP");
     });
+
+    it("should throw error if user not found", async () => {
+      const userId = "nonexistent-user";
+
+      (pool.query as jest.Mock).mockResolvedValueOnce({
+        rows: [],
+        rowCount: 0,
+      });
+
+      await expect(deactivateUserAccount(userId)).rejects.toThrow(
+        `User '${userId}' not found`,
+      );
+
+      expect(mockClient.release).toHaveBeenCalled();
+    });
   });
 });
