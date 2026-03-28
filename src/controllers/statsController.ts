@@ -1,15 +1,15 @@
 import { Request, Response } from "express";
 import { StatsService } from "../services/statsService";
-import { redisClient } from "../config/redis";
+import { Cache } from "../services/cache";
 
 const statsService = new StatsService();
-const CACHE_TTL = 15 * 60; // 15 minutes in seconds
 
 export class StatsController {
   /**
    * GET /api/stats
    * Get system-wide statistics and metrics
    */
+  @Cache()
   static async getStats(req: Request, res: Response) {
     try {
       const { startDate, endDate } = req.query;
@@ -23,17 +23,6 @@ export class StatsController {
       }
       if (endDate && isNaN(end!.getTime())) {
         return res.status(400).json({ error: "Invalid endDate format" });
-      }
-
-      // Generate cache key based on filters
-      const cacheKey = `stats:full:${startDate || "all"}:${endDate || "all"}`;
-
-      // Check cache
-      if (redisClient?.isOpen) {
-        const cachedData = await redisClient.get(cacheKey);
-        if (cachedData) {
-          return res.json(JSON.parse(cachedData));
-        }
       }
 
       // Fetch stats from service
@@ -55,25 +44,13 @@ export class StatsController {
         timestamp: new Date().toISOString(),
         cached: false,
       };
-
-      // Store in cache
-      if (redisClient?.isOpen) {
-        await redisClient.setEx(
-          cacheKey,
-          CACHE_TTL,
-          JSON.stringify({ ...response, cached: true }),
-        );
-      }
-
       return res.json(response);
     } catch (error) {
       console.error("Error fetching stats:", error);
-      return res
-        .status(500)
-        .json({
-          error: "Internal server error",
-          message: "Failed to calculate statistics",
-        });
+      return res.status(500).json({
+        error: "Internal server error",
+        message: "Failed to calculate statistics",
+      });
     }
   }
 }

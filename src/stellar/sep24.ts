@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import rateLimit from "express-rate-limit";
+import { sep24RateLimiter } from "../middleware/rateLimit";
 import { v4 as uuidv4 } from "uuid";
 import { Keypair } from "stellar-sdk";
 
@@ -330,11 +330,7 @@ export const calculateFee = async (
 
 const sep24Router = Router();
 
-const sep24Limiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 10,
-  message: { error: "Too many requests, please try again later" },
-});
+const sep24Limiter = sep24RateLimiter;
 
 sep24Router.get("/info", async (_req: Request, res: Response) => {
   try {

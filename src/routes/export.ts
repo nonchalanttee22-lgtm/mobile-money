@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import rateLimit from "express-rate-limit";
+import { exportRateLimiter } from "../middleware/rateLimit";
 import QueryStream from "pg-query-stream";
 import { pipeline, Transform } from "stream";
 import { pool } from "../config/database";
@@ -223,12 +223,7 @@ function defaultQueryStreamFactory(text: string, values: unknown[]): unknown {
   return new QueryStream(text, values, { batchSize: 250 });
 }
 
-const exportRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+const exportRateLimiterMiddleware = exportRateLimiter;
 
 export function createExportRoutes(
   dependencies: ExportRouteDependencies = {},
@@ -238,7 +233,7 @@ export function createExportRoutes(
   const createQueryStream =
     dependencies.createQueryStream ?? defaultQueryStreamFactory;
 
-  router.get("/export", exportRateLimiter, requireAuth, async (req: Request, res: Response) => {
+  router.get("/export", exportRateLimiterMiddleware, requireAuth, async (req: Request, res: Response) => {
     let client: QueryableClient | null = null;
     let released = false;
 
