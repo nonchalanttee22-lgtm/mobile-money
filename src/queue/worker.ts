@@ -14,7 +14,7 @@ import { withRetry } from "../services/retry";
 import { WhatsappService } from "../services/whatsapp";
 import { notifyTransactionWebhook, WebhookService } from "../services/webhook";
 import { pushNotificationService } from "../services/push";
-
+import { capturePersistentFailure } from "./dlq";
 const transactionModel = new TransactionModel();
 const mobileMoneyService = new MobileMoneyService();
 const stellarService = new StellarService();
@@ -315,6 +315,10 @@ transactionWorker.on(
       `[${job?.id}] Job failed after ${job?.attemptsMade} attempts:`,
       error.message,
     );
+
+    if (job) {
+      capturePersistentFailure(job).catch(err => console.error('[DLQ] Error capturing failure:', err));
+    }
   },
 );
 
