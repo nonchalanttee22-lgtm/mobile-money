@@ -1,7 +1,8 @@
 import multer from "multer";
-import { Request } from "express";
+import { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 import path from "path";
+import sharp from "sharp";
 
 /**
  * Allowed file types for KYC documents
@@ -82,4 +83,52 @@ export const uploadErrorMessages = {
   INVALID_FILE_TYPE: `Invalid file type. Allowed types: ${ALLOWED_MIME_TYPES.join(", ")}`,
   NO_FILE_UPLOADED: "No file uploaded",
   UPLOAD_FAILED: "File upload failed",
+};
+
+/**
+  Middleware to optimize image with sharp before s3 upload
+ */
+
+export const optimizeProfileImage = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  if (!req.file) {
+    res.status(400).json({
+      status: "fail",
+      message: uploadErrorMessages.NO_FILE_UPLOADED,
+    });
+    return next();
+  }
+
+  if (!ALLOWED_MIME_TYPES.includes(req.file.mimetype)) {
+    res.status(400).json({
+      status: "fail",
+      message: uploadErrorMessages.INVALID_FILE_TYPE,
+    });
+    return next();
+  }
+
+  try {
+    const optimizedBuffer = await sharp(req.file.buffer)
+      .resize(500, 500, { fit: "cover", position: "center" })
+      .webp({ quality: 80 })
+      .toBuffer();
+
+    req.file.buffer = optimizedBuffer;
+    req.file.mimetype = "image/webp";
+    req.file.size = optimizedBuffer.length;
+
+    const originalNameWithoutExt = req.file.originalname.replace(
+      /\.[^/.]+$/,
+      "",
+    );
+    req.file.originalname = `${originalNameWithoutExt}.webp`;
+
+    next();
+  } catch (error) {
+    console.error("Image optimization error:", error);
+    res.status(500).json({ error: "Failed to optimize image before upload" });
+  }
 };

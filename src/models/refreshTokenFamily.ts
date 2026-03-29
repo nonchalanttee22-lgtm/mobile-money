@@ -1,4 +1,4 @@
-import { pool } from "../config/database";
+import { pool, queryRead, queryWrite } from "../config/database";
 
 export interface RefreshTokenFamily {
   id: string;
@@ -13,7 +13,7 @@ export interface RefreshTokenFamily {
 
 export class RefreshTokenFamilyModel {
   async create({ user_id, family_id, token, parent_token }: { user_id: string; family_id: string; token: string; parent_token?: string; }) {
-    const result = await pool.query(
+    const result = await queryWrite(
       `INSERT INTO refresh_token_families (user_id, family_id, token, parent_token) VALUES ($1, $2, $3, $4) RETURNING *`,
       [user_id, family_id, token, parent_token || null]
     );
@@ -21,7 +21,7 @@ export class RefreshTokenFamilyModel {
   }
 
   async findByToken(token: string) {
-    const result = await pool.query(
+    const result = await queryRead(
       `SELECT * FROM refresh_token_families WHERE token = $1`,
       [token]
     );
@@ -29,14 +29,14 @@ export class RefreshTokenFamilyModel {
   }
 
   async revokeFamily(family_id: string) {
-    await pool.query(
+    await queryWrite(
       `UPDATE refresh_token_families SET is_revoked = TRUE, revoked_at = NOW() WHERE family_id = $1`,
       [family_id]
     );
   }
 
   async isRevoked(token: string) {
-    const result = await pool.query(
+    const result = await queryRead(
       `SELECT is_revoked FROM refresh_token_families WHERE token = $1`,
       [token]
     );

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import rateLimit from "express-rate-limit";
+import { sep31RateLimiter } from "../middleware/rateLimit";
 import crypto from "crypto";
 import { TransactionModel, TransactionStatus } from "../models/transaction";
 import { getConfiguredPaymentAsset } from "../services/stellar/assetService";
@@ -7,67 +7,177 @@ import { getConfiguredPaymentAsset } from "../services/stellar/assetService";
 const router = Router();
 const transactionModel = new TransactionModel();
 
-// Strict rate limiter for SEP-31 endpoints
-const sep31Limiter = process.env.NODE_ENV === "test" 
+// --- SEP-31 Status State Machine ---
+// Valid statuses per SEP-31 spec
+export enum Sep31Status {
+  PendingSender = "pending_sender",
+  PendingStellar = "pending_stellar",
+  PendingReceiver = "pending_receiver",
+  PendingExternal = "pending_external",
+  Completed = "completed",
+  Error = "error",
+}
+
+// Valid status transitions
+const VALID_TRANSITIONS: Record<string, string[]> = {
+  [Sep31Status.PendingSender]: [Sep31Status.PendingStellar, Sep31Status.Error],
+  [Sep31Status.PendingStellar]: [Sep31Status.PendingReceiver, Sep31Status.PendingExternal, Sep31Status.Completed, Sep31Status.Error],
+  [Sep31Status.PendingReceiver]: [Sep31Status.PendingExternal, Sep31Status.Completed, Sep31Status.Error],
+  [Sep31Status.PendingExternal]: [Sep31Status.Completed, Sep31Status.Error],
+  [Sep31Status.Completed]: [],
+  [Sep31Status.Error]: [Sep31Status.PendingStellar, Sep31Status.PendingReceiver],
+};
+
+function isValidTransition(from: string, to: string): boolean {
+  return (VALID_TRANSITIONS[from] || []).includes(to);
+}
+
+// Map internal TransactionStatus to SEP-31 status
+function mapToSep31Status(status: TransactionStatus, metadata?: Record<string, unknown>): Sep31Status {
+  const sep31Meta = (metadata as any)?.sep31;
+  if (sep31Meta?.status) return sep31Meta.status as Sep31Status;
+
+  switch (status) {
+    case TransactionStatus.Completed: return Sep31Status.Completed;
+    case TransactionStatus.Failed: return Sep31Status.Error;
+    case TransactionStatus.Cancelled: return Sep31Status.Error;
+    default: return Sep31Status.PendingSender;
+  }
+}
+
+// --- Configuration ---
+const SEP31_CONFIG = {
+  minAmount: parseFloat(process.env.SEP31_MIN_AMOUNT || "0.1"),
+  maxAmount: parseFloat(process.env.SEP31_MAX_AMOUNT || "1000000"),
+  feeFixed: parseFloat(process.env.SEP31_FEE_FIXED || "1.00"),
+  feePercent: parseFloat(process.env.SEP31_FEE_PERCENT || "0.5"),
+  statusEta: parseInt(process.env.SEP31_STATUS_ETA || "600", 10),
+  get receivingAccount(): string {
+    return process.env.STELLAR_RECEIVING_ACCOUNT || "";
+  },
+};
+
+// --- Rate Limiters ---
+// Read endpoints: higher limit (info lookups, status checks)
+const sep31ReadLimiter = process.env.NODE_ENV === "test"
   ? (req: any, res: any, next: any) => next()
   : rateLimit({
-      windowMs: 60 * 1000, // 1 minute
-      max: 10, // Limit each IP to 10 requests per window (strict)
+      windowMs: 60 * 1000,
+      max: 30,
       standardHeaders: true,
       legacyHeaders: false,
-      message: {
-        error: "Too many requests, please try again later.",
-      },
+      message: { error: "Too many requests, please try again later." },
     });
+
+// Write endpoints: strict limit (transaction creation)
+const sep31WriteLimiter = process.env.NODE_ENV === "test"
+  ? (req: any, res: any, next: any) => next()
+  : rateLimit({
+      windowMs: 60 * 1000,
+      max: 10,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: "Too many requests, please try again later." },
+    });
+
+// --- Helpers ---
+function getAssetCode(): string {
+  const asset = getConfiguredPaymentAsset();
+  return asset.isNative() ? "XLM" : asset.getCode();
+}
+
+function getAssetString(): string {
+  const asset = getConfiguredPaymentAsset();
+  return asset.isNative() ? "stellar:native" : `stellar:${asset.getCode()}:${asset.getIssuer()}`;
+}
+
+function parseAssetCode(rawCode: string): string {
+  if (rawCode.startsWith("stellar:")) {
+    const parts = rawCode.split(":");
+    return parts[1];
+  }
+  return rawCode;
+}
+
+function calculateFee(amount: number): { fee: number; total: number } {
+  let fee = SEP31_CONFIG.feeFixed + (amount * SEP31_CONFIG.feePercent / 100);
+  fee = parseFloat(fee.toFixed(7));
+  return { fee, total: parseFloat((amount + fee).toFixed(7)) };
+}
+
+function generateMemo(): string {
+  // Generate a short unique memo (max 28 chars for Stellar text memo)
+  return crypto.randomUUID().replace(/-/g, "").substring(0, 28);
+}
+
+// Validate UUID format
+function isValidUUID(str: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
+// --- Routes ---
 
 /**
  * GET /info
- * 
- * Provides information about the assets the anchor supports for SEP-31.
+ *
+ * Returns supported assets, fees, required fields, and sender/receiver types
+ * per the SEP-31 specification.
  */
-router.get("/info", sep31Limiter, async (req: Request, res: Response) => {
-  const asset = getConfiguredPaymentAsset();
-  const assetCode = asset.isNative() ? "XLM" : asset.getCode();
+router.get("/info", sep31ReadLimiter, async (req: Request, res: Response) => {
+  try {
+    const assetCode = getAssetCode();
 
-  const info = {
-    receive: {
-      [assetCode]: {
-        enabled: true,
-        fee_fixed: 0,
-        fee_percent: 0,
-        min_amount: 0.1,
-        max_amount: 1000000,
-        sender_sep12_type: "sep31-sender",
-        receiver_sep12_type: "sep31-receiver",
-        fields: {
-          transaction: {
-            receiver_id: {
-              description: "The ID of the receiver",
-              optional: false,
+    return res.json({
+      receive: {
+        [assetCode]: {
+          enabled: true,
+          fee_fixed: SEP31_CONFIG.feeFixed,
+          fee_percent: SEP31_CONFIG.feePercent,
+          min_amount: SEP31_CONFIG.minAmount,
+          max_amount: SEP31_CONFIG.maxAmount,
+          sender_sep12_type: "sep31-sender",
+          receiver_sep12_type: "sep31-receiver",
+          fields: {
+            transaction: {
+              receiver_id: {
+                description: "The SEP-12 ID of the receiver",
+                optional: false,
+              },
+              sender_id: {
+                description: "The SEP-12 ID of the sender",
+                optional: false,
+              },
+              receiver_routing_number: {
+                description: "Routing number of the receiver's bank account",
+                optional: true,
+              },
+              receiver_account_number: {
+                description: "Account number of the receiver's bank or mobile money account",
+                optional: true,
+              },
+              type: {
+                description: "Type of payout: SWIFT, SEPA, or mobile_money",
+                optional: true,
+              },
             },
-            sender_id: {
-              description: "The ID of the sender",
-              optional: false,
-            },
-            message: {
-              description: "Optional message for the receiver",
-              optional: true,
-            }
-          }
-        }
-      }
-    }
-  };
-
-  return res.json(info);
+          },
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error("SEP-31 /info error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 /**
  * POST /transactions
- * 
- * Creates a new SEP-31 transaction.
+ *
+ * Creates a new cross-border payment transaction.
+ * Validates amount, asset, sender/receiver fields, and returns
+ * the Stellar account + memo for the sender to make payment.
  */
-router.post("/transactions", sep31Limiter, async (req: Request, res: Response) => {
+router.post("/transactions", sep31WriteLimiter, async (req: Request, res: Response) => {
   const {
     amount,
     asset_code,
@@ -75,81 +185,148 @@ router.post("/transactions", sep31Limiter, async (req: Request, res: Response) =
     sender_id,
     receiver_id,
     fields,
+    lang,
   } = req.body;
 
+  // --- Input Validation ---
   if (!amount || !asset_code) {
-    return res.status(400).json({ error: "Missing required fields: amount, asset_code" });
+    return res.status(400).json({
+      error: "invalid_request",
+      message: "Missing required fields: amount, asset_code",
+    });
   }
 
-  // Handle asset_code with potential stellar: prefix
-  let cleanAssetCode = asset_code;
-  if (asset_code.startsWith("stellar:")) {
-    const parts = asset_code.split(":");
-    cleanAssetCode = parts[1];
+  const parsedAmount = parseFloat(amount);
+  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    return res.status(400).json({
+      error: "invalid_request",
+      message: "Amount must be a positive number",
+    });
   }
 
-  // Basic validation of fields
+  if (parsedAmount < SEP31_CONFIG.minAmount) {
+    return res.status(400).json({
+      error: "invalid_request",
+      message: `Amount below minimum: ${SEP31_CONFIG.minAmount}`,
+    });
+  }
+
+  if (parsedAmount > SEP31_CONFIG.maxAmount) {
+    return res.status(400).json({
+      error: "invalid_request",
+      message: `Amount above maximum: ${SEP31_CONFIG.maxAmount}`,
+    });
+  }
+
+  const cleanAssetCode = parseAssetCode(asset_code);
+  const configuredCode = getAssetCode();
+
+  if (cleanAssetCode !== configuredCode) {
+    return res.status(400).json({
+      error: "invalid_request",
+      message: `Asset ${cleanAssetCode} is not supported. Supported: ${configuredCode}`,
+    });
+  }
+
+  // Validate asset_issuer if provided (non-native assets)
+  const configuredAsset = getConfiguredPaymentAsset();
+  if (asset_issuer && !configuredAsset.isNative()) {
+    if (asset_issuer !== configuredAsset.getIssuer()) {
+      return res.status(400).json({
+        error: "invalid_request",
+        message: "Asset issuer does not match configured issuer",
+      });
+    }
+  }
+
+  // Extract sender/receiver from top-level or nested fields
   const txFields = fields?.transaction || {};
   const finalSenderId = sender_id || txFields.sender_id;
   const finalReceiverId = receiver_id || txFields.receiver_id;
 
   if (!finalSenderId || !finalReceiverId) {
-    return res.status(400).json({ error: "Missing required transaction fields: sender_id, receiver_id" });
+    return res.status(400).json({
+      error: "invalid_request",
+      message: "Missing required fields: sender_id, receiver_id",
+    });
   }
 
-  const asset = getConfiguredPaymentAsset();
-  const configuredCode = asset.isNative() ? "XLM" : asset.getCode();
-
-  if (cleanAssetCode !== configuredCode) {
-    return res.status(400).json({ error: `Asset ${cleanAssetCode} is not supported.` });
+  if (!SEP31_CONFIG.receivingAccount) {
+    console.error("SEP-31: STELLAR_RECEIVING_ACCOUNT not configured");
+    return res.status(500).json({
+      error: "server_error",
+      message: "Anchor receiving account not configured",
+    });
   }
 
   try {
-    const transactionId = crypto.randomUUID();
-    
-    // Map sender/receiver payload mapping
+    const memo = generateMemo();
+    const { fee, total } = calculateFee(parsedAmount);
+    const amountOut = parsedAmount; // Amount delivered to receiver (before payout fees)
+
+    // Build sender/receiver payload mapping
     const metadata = {
       sep31: {
+        status: Sep31Status.PendingSender,
         sender_id: finalSenderId,
         receiver_id: finalReceiverId,
-        message: txFields.message,
-      }
+        receiver_routing_number: txFields.receiver_routing_number || null,
+        receiver_account_number: txFields.receiver_account_number || null,
+        payout_type: txFields.type || "mobile_money",
+        message: txFields.message || null,
+        memo,
+        memo_type: "text",
+        amount_in: total.toString(),
+        amount_out: amountOut.toString(),
+        amount_fee: fee.toString(),
+        asset_code: cleanAssetCode,
+        asset_issuer: configuredAsset.isNative() ? null : configuredAsset.getIssuer(),
+        lang: lang || "en",
+      },
     };
 
     const newTransaction = await transactionModel.create({
-      type: "deposit", // SEP-31 receive is like a deposit for the receiver
-      amount: amount.toString(),
-      phoneNumber: "SEP-31", // Placeholder
+      type: "deposit",
+      amount: total.toString(),
+      phoneNumber: "SEP-31",
       provider: "stellar-sep31",
-      stellarAddress: "", // Will be updated
+      stellarAddress: SEP31_CONFIG.receivingAccount,
       status: TransactionStatus.Pending,
       metadata,
-      notes: `SEP-31 Transaction from ${finalSenderId} to ${finalReceiverId}`,
+      notes: `SEP-31 cross-border payment from ${finalSenderId} to ${finalReceiverId}`,
     });
-
-    // SEP-31 response format
-    const memo = newTransaction.id.length <= 28 ? newTransaction.id : newTransaction.id.substring(0, 28);
 
     return res.status(201).json({
       id: newTransaction.id,
-      status: "pending_sender",
-      stellar_account_id: process.env.STELLAR_RECEIVING_ACCOUNT || "GABC...", // Anchor's receiving account
+      status: Sep31Status.PendingSender,
+      status_eta: SEP31_CONFIG.statusEta,
+      stellar_account_id: SEP31_CONFIG.receivingAccount,
       stellar_memo_type: "text",
       stellar_memo: memo,
+      amount_in: total.toString(),
+      amount_in_asset: getAssetString(),
+      amount_out: amountOut.toString(),
+      amount_out_asset: getAssetString(),
+      amount_fee: fee.toString(),
+      amount_fee_asset: getAssetString(),
     });
   } catch (error: any) {
-    console.error("Error creating SEP-31 transaction:", error);
+    console.error("SEP-31 POST /transactions error:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
 
 /**
  * GET /transactions/:id
- * 
- * Retrieves a transaction by ID.
+ *
+ * Returns the current status and details of a SEP-31 transaction.
  */
-router.get("/transactions/:id", sep31Limiter, async (req: Request, res: Response) => {
+router.get("/transactions/:id", sep31ReadLimiter, async (req: Request, res: Response) => {
   const { id } = req.params;
+
+  if (!isValidUUID(id)) {
+    return res.status(400).json({ error: "Invalid transaction ID format" });
+  }
 
   try {
     const transaction = await transactionModel.findById(id);
@@ -158,37 +335,115 @@ router.get("/transactions/:id", sep31Limiter, async (req: Request, res: Response
       return res.status(404).json({ error: "Transaction not found" });
     }
 
-    // Map to SEP-31 status format
-    let sep31Status = "pending_sender";
-    if (transaction.status === TransactionStatus.Completed) sep31Status = "completed";
-    if (transaction.status === TransactionStatus.Failed) sep31Status = "error";
+    // Verify this is a SEP-31 transaction
+    const sep31Meta = (transaction.metadata as any)?.sep31;
+    if (!sep31Meta) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
 
-    const asset = getConfiguredPaymentAsset();
-    const assetString = asset.isNative() ? "stellar:native" : `stellar:${asset.getCode()}:${asset.getIssuer()}`;
+    const sep31Status = mapToSep31Status(transaction.status, transaction.metadata);
+    const assetString = getAssetString();
 
     return res.json({
       transaction: {
         id: transaction.id,
         status: sep31Status,
-        status_eta: 600,
-        amount_in: transaction.amount,
+        status_eta: sep31Status === Sep31Status.Completed || sep31Status === Sep31Status.Error
+          ? null
+          : SEP31_CONFIG.statusEta,
+        amount_in: sep31Meta.amount_in || transaction.amount,
         amount_in_asset: assetString,
-        amount_out: transaction.amount,
+        amount_out: sep31Meta.amount_out || transaction.amount,
         amount_out_asset: assetString,
-        amount_fee: "0",
+        amount_fee: sep31Meta.amount_fee || "0",
         amount_fee_asset: assetString,
-        stellar_account_id: process.env.STELLAR_RECEIVING_ACCOUNT || "GABC...",
-        stellar_memo_type: "text",
-        stellar_memo: transaction.id.length <= 28 ? transaction.id : transaction.id.substring(0, 28),
-        stellar_transaction_id: (transaction.metadata as any)?.stellar_tx_id || "",
+        stellar_account_id: SEP31_CONFIG.receivingAccount,
+        stellar_memo_type: sep31Meta.memo_type || "text",
+        stellar_memo: sep31Meta.memo || "",
+        stellar_transaction_id: sep31Meta.stellar_transaction_id || null,
         started_at: transaction.createdAt.toISOString(),
-        completed_at: transaction.updatedAt ? transaction.updatedAt.toISOString() : null,
-      }
+        completed_at: sep31Status === Sep31Status.Completed
+          ? (transaction.updatedAt || transaction.createdAt).toISOString()
+          : null,
+        required_info_message: sep31Meta.required_info_message || null,
+        required_info_updates: sep31Meta.required_info_updates || null,
+        message: sep31Meta.message || null,
+        refunded: sep31Meta.refunded || false,
+      },
     });
   } catch (error: any) {
-    console.error("Error fetching SEP-31 transaction:", error);
+    console.error("SEP-31 GET /transactions/:id error:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
 
+/**
+ * PATCH /transactions/:id
+ *
+ * Updates transaction fields (e.g. when the anchor requests additional info).
+ * Only allows updates when the transaction is in a pending state.
+ */
+router.patch("/transactions/:id", sep31WriteLimiter, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { fields } = req.body;
+
+  if (!isValidUUID(id)) {
+    return res.status(400).json({ error: "Invalid transaction ID format" });
+  }
+
+  if (!fields || !fields.transaction) {
+    return res.status(400).json({
+      error: "invalid_request",
+      message: "Missing required: fields.transaction",
+    });
+  }
+
+  try {
+    const transaction = await transactionModel.findById(id);
+
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+
+    const sep31Meta = (transaction.metadata as any)?.sep31;
+    if (!sep31Meta) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+
+    const currentStatus = mapToSep31Status(transaction.status, transaction.metadata);
+
+    // Only allow updates on pending transactions
+    if (currentStatus === Sep31Status.Completed) {
+      return res.status(400).json({
+        error: "invalid_request",
+        message: "Cannot update a completed transaction",
+      });
+    }
+
+    // Merge updated fields into metadata
+    const txFields = fields.transaction;
+    const updatedSep31 = {
+      ...sep31Meta,
+      ...(txFields.receiver_routing_number !== undefined && { receiver_routing_number: txFields.receiver_routing_number }),
+      ...(txFields.receiver_account_number !== undefined && { receiver_account_number: txFields.receiver_account_number }),
+      ...(txFields.type !== undefined && { payout_type: txFields.type }),
+      required_info_message: null,
+      required_info_updates: null,
+    };
+
+    const updatedMetadata = {
+      ...(transaction.metadata as Record<string, unknown>),
+      sep31: updatedSep31,
+    };
+
+    await transactionModel.updateMetadata(id, updatedMetadata);
+
+    return res.json({ status: "updated" });
+  } catch (error: any) {
+    console.error("SEP-31 PATCH /transactions/:id error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+export { Sep31Status, SEP31_CONFIG, calculateFee, mapToSep31Status, isValidTransition, VALID_TRANSITIONS };
 export default router;

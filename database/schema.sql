@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS users (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   phone_number  VARCHAR(20) UNIQUE NOT NULL,
   kyc_level     VARCHAR(20) NOT NULL CHECK (kyc_level IN ('unverified', 'basic', 'full')),
+  profile_url   TEXT,
   created_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -23,6 +24,36 @@ DROP TRIGGER IF EXISTS users_updated_at ON users;
 CREATE TRIGGER users_updated_at
   BEFORE UPDATE ON users
   FOR EACH ROW EXECUTE FUNCTION update_users_updated_at();
+
+-- Vaults table for vault management
+CREATE TABLE IF NOT EXISTS vaults (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  name          VARCHAR(255) NOT NULL,
+  description   TEXT,
+  owner_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  balance       DECIMAL(20, 7) NOT NULL DEFAULT 0,
+  status        VARCHAR(20) NOT NULL CHECK (status IN ('active', 'inactive', 'locked')) DEFAULT 'active',
+  created_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_vaults_owner_id ON vaults(owner_id);
+CREATE INDEX IF NOT EXISTS idx_vaults_status ON vaults(status);
+CREATE INDEX IF NOT EXISTS idx_vaults_created_at ON vaults(created_at);
+
+-- Auto-update updated_at on vaults
+CREATE OR REPLACE FUNCTION update_vaults_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = CURRENT_TIMESTAMP;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS vaults_updated_at ON vaults;
+CREATE TRIGGER vaults_updated_at
+  BEFORE UPDATE ON vaults
+  FOR EACH ROW EXECUTE FUNCTION update_vaults_updated_at();
 
 -- Transactions table
 CREATE TABLE IF NOT EXISTS transactions (
@@ -74,6 +105,6 @@ ADD COLUMN IF NOT EXISTS webhook_last_error TEXT;
 
 -- Add vault_id to link transactions to vaults for vault-related transfers
 ALTER TABLE transactions 
-ADD COLUMN IF NOT EXISTS vault_id UUID REFERENCES vaults(id);
+ADD COLUMN IF NOT EXISTS vault_id UUID REFERENCES vaults(id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS idx_transactions_vault_id ON transactions(vault_id);

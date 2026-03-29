@@ -1,12 +1,17 @@
 import { Request, Response } from "express";
 import { transactionQueue, getQueueStats } from "./transactionQueue";
+import { providerBalanceAlertQueue } from "./providerBalanceAlertQueue";
 import { QueueHealthResponse, QueueActionResponse } from "../types/api";
 
 export async function getQueueHealth(req: Request, res: Response) {
   try {
-    const stats = await getQueueStats();
+    const [stats, providerBalanceFailed] = await Promise.all([
+      getQueueStats(),
+      providerBalanceAlertQueue.getFailedCount(),
+    ]);
 
-    const isHealthy = !stats.isPaused && stats.failed < 100;
+    const isHealthy =
+      !stats.isPaused && stats.failed < 100 && providerBalanceFailed < 20;
 
     const body: QueueHealthResponse = {
       status: isHealthy ? "healthy" : "degraded",

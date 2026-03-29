@@ -1,4 +1,4 @@
-import { pool } from "../config/database";
+import { pool, queryRead, queryWrite } from "../config/database";
 import { encrypt, decrypt } from "../utils/encryption";
 
 export interface User {
@@ -11,11 +11,13 @@ export interface User {
   status: 'active' | 'frozen' | 'suspended';
   createdAt: Date;
   updatedAt: Date;
+  // TODO: The `User` type and database table needs to
+  // be update with these fields:  is_active: boolean,   deactivated_at:Date`
 }
 
 export class UserModel {
   async findById(id: string): Promise<User | null> {
-    const result = await pool.query("SELECT * FROM users WHERE id = $1", [id]);
+    const result = await queryRead("SELECT * FROM users WHERE id = $1", [id]);
     if (result.rows.length === 0) return null;
 
     const row = result.rows[0];
@@ -34,7 +36,7 @@ export class UserModel {
 
   async updateEmail(id: string, email: string): Promise<void> {
     const encryptedEmail = encrypt(email);
-    await pool.query("UPDATE users SET email = $1 WHERE id = $2", [encryptedEmail, id]);
+    await queryWrite("UPDATE users SET email = $1 WHERE id = $2", [encryptedEmail, id]);
   }
 
   async updateStatus(
@@ -129,7 +131,7 @@ export class UserModel {
       ORDER BY a.created_at DESC
     `;
 
-    const result = await pool.query(query, [userId]);
+    const result = await queryRead(query, [userId]);
     return result.rows;
   }
 }

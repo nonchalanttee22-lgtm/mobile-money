@@ -4,6 +4,7 @@ import { runCleanupJob } from "./cleanupJob";
 import { runReportJob } from "./reportJob";
 import { runStatusCheckJob } from "./statusCheckJob";
 import { runDisputeSlaJob } from "./disputeSlaJob";
+import { runProviderBalanceAlertJob } from "./balances";
 
 interface JobConfig {
   name: string;
@@ -35,6 +36,12 @@ const JOBS: JobConfig[] = [
     // Daily at 3:00 AM - merges inactive auxiliary Stellar accounts
     schedule: process.env.ACCOUNT_MERGE_CRON || "0 3 * * *",
     handler: runAccountMergeJob,
+  },
+  {
+    name: "provider-balance-alert",
+    // Every 10 minutes - checks MTN/Airtel operational balances and alerts treasury when low
+    schedule: process.env.PROVIDER_BALANCE_ALERT_CRON || "*/10 * * * *",
+    handler: runProviderBalanceAlertJob,
   },
 ];
 

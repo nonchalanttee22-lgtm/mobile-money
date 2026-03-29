@@ -1,4 +1,4 @@
-import { pool } from "../config/database";
+import { pool, queryRead, queryWrite } from "../config/database";
 
 export type DestinationType = "phone" | "stellar";
 
@@ -39,7 +39,7 @@ function mapRow(row: any): UserContact {
 
 export class ContactModel {
   async create(input: CreateUserContactInput): Promise<UserContact> {
-    const result = await pool.query(
+    const result = await queryWrite(
       `INSERT INTO user_contacts (user_id, destination_type, destination_value, nickname)
        VALUES ($1, $2, $3, $4)
        RETURNING id, user_id, destination_type, destination_value, nickname, created_at, updated_at`,
@@ -55,7 +55,7 @@ export class ContactModel {
   }
 
   async listByUser(userId: string): Promise<UserContact[]> {
-    const result = await pool.query(
+    const result = await queryRead(
       `SELECT id, user_id, destination_type, destination_value, nickname, created_at, updated_at
        FROM user_contacts
        WHERE user_id = $1
@@ -70,7 +70,7 @@ export class ContactModel {
     id: string,
     userId: string,
   ): Promise<UserContact | null> {
-    const result = await pool.query(
+    const result = await queryRead(
       `SELECT id, user_id, destination_type, destination_value, nickname, created_at, updated_at
        FROM user_contacts
        WHERE id = $1 AND user_id = $2
@@ -112,7 +112,7 @@ export class ContactModel {
       return this.findByIdForUser(id, userId);
     }
 
-    const result = await pool.query(
+    const result = await queryWrite(
       `UPDATE user_contacts
        SET ${updates.join(", ")}
        WHERE id = $1 AND user_id = $2
@@ -128,7 +128,7 @@ export class ContactModel {
   }
 
   async deleteByIdForUser(id: string, userId: string): Promise<boolean> {
-    const result = await pool.query(
+    const result = await queryWrite(
       `DELETE FROM user_contacts
        WHERE id = $1 AND user_id = $2`,
       [id, userId],

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import rateLimit from "express-rate-limit";
+import { stellarRateLimiter } from "../middleware/rateLimit";
 import NodeCache from "node-cache";
 import { StrKey, Horizon } from "stellar-sdk";
 
@@ -9,10 +9,7 @@ const router = Router();
 const cache = new NodeCache({ stdTTL: 300 });
 
 // Rate limiter (per IP)
-const limiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 20,
-});
+const limiter = stellarRateLimiter;
 
 // Horizon server
 const server = new Horizon.Server(

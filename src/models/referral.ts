@@ -1,4 +1,4 @@
-import { pool } from "../config/database";
+import { pool, queryRead, queryWrite } from "../config/database";
 import { v4 as uuidv4 } from "uuid";
 
 export interface Referral {
@@ -13,7 +13,7 @@ export interface Referral {
 export class ReferralModel {
   async createReferral(user_id: string, referred_by?: string) {
     const referral_code = uuidv4().replace(/-/g, '').slice(0, 10);
-    const result = await pool.query(
+    const result = await queryWrite(
       `INSERT INTO referrals (user_id, referral_code, referred_by) VALUES ($1, $2, $3) RETURNING *`,
       [user_id, referral_code, referred_by || null]
     );
@@ -21,7 +21,7 @@ export class ReferralModel {
   }
 
   async findByCode(referral_code: string) {
-    const result = await pool.query(
+    const result = await queryRead(
       `SELECT * FROM referrals WHERE referral_code = $1`,
       [referral_code]
     );
@@ -29,14 +29,14 @@ export class ReferralModel {
   }
 
   async markRewardGranted(id: string) {
-    await pool.query(
+    await queryWrite(
       `UPDATE referrals SET reward_granted = TRUE WHERE id = $1`,
       [id]
     );
   }
 
   async hasUsedReferral(user_id: string) {
-    const result = await pool.query(
+    const result = await queryRead(
       `SELECT * FROM referrals WHERE user_id = $1 AND referred_by IS NOT NULL`,
       [user_id]
     );

@@ -1,0 +1,54 @@
+import { Request, Response, Router } from "express";
+import { requireAuth } from "../middleware/auth";
+import { optimizeProfileImage, upload } from "../middleware/upload";
+import { uploadToS3 } from "../services/s3Upload";
+import { pool } from "../config/database";
+
+const router = Router();
+
+router.post(
+  "/profile-picture",
+  requireAuth,
+  upload.single("avatar"),
+  optimizeProfileImage,
+  async (req: Request, res: Response) => {
+    try {
+      const file = req.file;
+      const userId = req.user?.id ?? "";
+
+      if (!file) {
+        return res.status(400).json({ error: "No image provided" });
+      }
+
+      const uploadResult = await uploadToS3({
+        userId,
+        file,
+        metadata: { type: "profile_picture" },
+      });
+
+      if (!uploadResult.success) {
+        return res.status(500).json({ error: uploadResult.error });
+      }
+
+      const avatarUrl = uploadResult.fileUrl;
+
+      const updateQuery = `
+        UPDATE users
+        SET profile_url = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+        RETURNING id, profile_url;
+      `;
+      await pool.query(updateQuery, [avatarUrl, userId]);
+
+      res.status(200).json({
+        message: "Profile picture uploaded successfully",
+        data: { url: avatarUrl },
+      });
+    } catch (error) {
+      console.error("Controller upload error:", error);
+      res.status(500).json({ error: "Internal server error during upload" });
+    }
+  },
+);
+
+export { router as userRoutes };

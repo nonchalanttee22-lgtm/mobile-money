@@ -14,6 +14,17 @@ interface AirtelResponse {
   };
 }
 
+interface AirtelBalanceResponse {
+  data?: {
+    balance?: string | number;
+    availableBalance?: string | number;
+    currency?: string;
+  };
+  balance?: string | number;
+  availableBalance?: string | number;
+  currency?: string;
+}
+
 export class AirtelService {
   private client: AxiosInstance;
   private token: string | null = null;
@@ -155,6 +166,55 @@ export class AirtelService {
           },
         );
         return { success: true, data: response.data };
+      } catch (error) {
+        return { success: false, error };
+      }
+    });
+  }
+
+  async getOperationalBalance() {
+    const token = await this.authenticate();
+
+    return this.withRetry(async () => {
+      try {
+        const response = await this.client.get<AirtelBalanceResponse>(
+          "/standard/v1/users/balance",
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "X-Country": process.env.AIRTEL_COUNTRY || "NG",
+              "X-Currency": process.env.AIRTEL_CURRENCY || "NGN",
+            },
+          },
+        );
+
+        const rawBalance =
+          response.data.data?.availableBalance ??
+          response.data.data?.balance ??
+          response.data.availableBalance ??
+          response.data.balance ??
+          0;
+
+        const availableBalance =
+          typeof rawBalance === "number"
+            ? rawBalance
+            : Number.parseFloat(String(rawBalance));
+
+        if (!Number.isFinite(availableBalance)) {
+          throw new Error("Invalid Airtel balance response");
+        }
+
+        return {
+          success: true,
+          data: {
+            availableBalance,
+            currency:
+              response.data.data?.currency ||
+              response.data.currency ||
+              process.env.AIRTEL_CURRENCY ||
+              "NGN",
+          },
+        };
       } catch (error) {
         return { success: false, error };
       }

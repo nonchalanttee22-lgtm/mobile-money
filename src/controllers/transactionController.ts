@@ -373,6 +373,7 @@ async function processTransactionRequest(
               idempotencyExpiresAt: idempotencyKey
                 ? buildIdempotencyExpiry()
                 : null,
+              locationMetadata: req.geoLocation ?? null,
             });
             void monitorTransactionForAML(transaction);
 

@@ -264,6 +264,32 @@ These are loaded from GitHub secrets and passed to the deployment:
 
 #### 1. Test Failures
 
+# Example snippet for your .github/workflows/ci.yml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        # Add this block to use your authenticated account for service pulls
+        credentials:
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      redis:
+        image: redis:7-alpine
+        credentials:
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+**Symptom**: `Error response from daemon: unauthorized: incorrect username or password` OR `toomanyrequests` during Service Container startup.
+
+**Possible Causes**:
+- The `REGISTRY_USERNAME` or `REGISTRY_PASSWORD` secrets are incorrect or expired.
+- Docker Hub rate limits reached on GitHub's shared IP.
+
+**Solutions**:
+- Update `REGISTRY_PASSWORD` with a fresh **Docker Hub Personal Access Token (PAT)**.
+- Ensure `REGISTRY_USERNAME` matches your Docker Hub handle exactly.
+
 **Symptom**: CI workflow fails at "Run tests with coverage" step
 
 **Possible Causes**:

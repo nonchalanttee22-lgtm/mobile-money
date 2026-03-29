@@ -1,6 +1,8 @@
 import { Router, Request, Response } from "express";
-import rateLimit from "express-rate-limit";
+import { sep24RateLimiter } from "../middleware/rateLimit";
 import { v4 as uuidv4 } from "uuid";
+import { Transaction, Keypair, StrKey } from "stellar-sdk";
+import { getStellarServer, getNetworkPassphrase, STELLAR_NETWORKS } from "../config/stellar";
 import { Keypair } from "stellar-sdk";
 
 function isValidStellarPublicKey(key: string): boolean {
@@ -214,32 +216,50 @@ export const generateInteractiveUrl = async (
 
 export const initiateDeposit = async (request: DepositRequest): Promise<InteractiveFlowResponse> => {
   const config = getSep24Config();
-  const asset = config.assets[request.asset_code];
+  const asset = config.assets[request.asset_code as keyof typeof config.assets];
 
   if (!asset || !asset.deposits_enabled) {
     throw new Error(`Asset ${request.asset_code} is not available for deposit`);
   }
 
   const amount = parseFloat(request.amount);
-  if (asset.min_amount && amount < asset.min_amount) throw new Error(`Min: ${asset.min_amount}`);
-  if (asset.max_amount && amount > asset.max_amount) throw new Error(`Max: ${asset.max_amount}`);
-  if (!request.account || !isValidStellarPublicKey(request.account)) throw new Error("Invalid address");
+  if (asset.min_amount && amount < asset.min_amount) {
+    throw new Error(`Minimum deposit amount is ${asset.min_amount}`);
+  }
+  if (asset.max_amount && amount > asset.max_amount) {
+    throw new Error(`Maximum deposit amount is ${asset.max_amount}`);
+  }
 
+  // Validate account
+  if (!request.account || !StrKey.isValidEd25519PublicKey(request.account)) {
+    throw new Error("Invalid Stellar account address");
+  }
+  if (!request.account || !isValidStellarPublicKey(request.account)) throw new Error("Invalid address");
   return generateInteractiveUrl(request, "deposit");
 };
 
 export const initiateWithdrawal = async (request: WithdrawRequest): Promise<InteractiveFlowResponse> => {
   const config = getSep24Config();
-  const asset = config.assets[request.asset_code];
+  const asset = config.assets[request.asset_code as keyof typeof config.assets];
 
   if (!asset || !asset.withdrawals_enabled) {
     throw new Error(`Asset ${request.asset_code} is not available for withdrawal`);
   }
 
   const amount = parseFloat(request.amount);
-  if (asset.min_amount && amount < asset.min_amount) throw new Error(`Min: ${asset.min_amount}`);
-  if (asset.max_amount && amount > asset.max_amount) throw new Error(`Max: ${asset.max_amount}`);
-  if (!request.account || !isValidStellarPublicKey(request.account)) throw new Error("Invalid address");
+  if (asset.min_amount && amount < asset.min_amount) {
+    throw new Error(`Minimum withdrawal amount is ${asset.min_amount}`);
+  }
+  if (asset.max_amount && amount > asset.max_amount) {
+    throw new Error(`Maximum withdrawal amount is ${asset.max_amount}`);
+  }
+
+  // Validate account (for withdrawal, this is the source account)
+  if (!request.account || !StrKey.isValidEd25519PublicKey(request.account)) {
+    throw new Error("Invalid Stellar account address");
+  }
+  
+    if (!request.account || !isValidStellarPublicKey(request.account)) throw new Error("Invalid address");
 
   return generateInteractiveUrl(request, "withdrawal");
 };
@@ -309,8 +329,11 @@ export const calculateFee = async (
   _operation: "deposit" | "withdrawal"
 ): Promise<{ fee: string; fee_details?: { fixed: number; percent: number } }> => {
   const config = getSep24Config();
-  const asset = config.assets[assetCode];
-  if (!asset) throw new Error(`Asset ${assetCode} not supported`);
+  const asset = config.assets[assetCode as keyof typeof config.assets];
+
+  if (!asset) {
+    throw new Error(`Asset ${assetCode} not supported`);
+  }
 
   const amountNum = parseFloat(amount);
   // ERROR FIX: Changed 'let' to 'const' as 'fee' is not reassigned
@@ -330,11 +353,7 @@ export const calculateFee = async (
 
 const sep24Router = Router();
 
-const sep24Limiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 10,
-  message: { error: "Too many requests, please try again later" },
-});
+const sep24Limiter = sep24RateLimiter;
 
 sep24Router.get("/info", async (_req: Request, res: Response) => {
   try {
@@ -427,3 +446,4 @@ sep24Router.get("/health", (_req: Request, res: Response) => {
 });
 
 export default sep24Router;
+export { getSep24Config };

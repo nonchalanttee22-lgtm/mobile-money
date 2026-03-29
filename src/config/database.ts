@@ -1,4 +1,6 @@
 import { Pool, QueryConfig, QueryResult, QueryResultRow, PoolClient } from "pg";
+import { isReadOnlyQuery } from "../utils/readOnlyDetector";
+
 
 // Configuration for slow query logging
 const SLOW_QUERY_THRESHOLD_MS = parseInt(
@@ -125,7 +127,8 @@ class SlowQueryPool extends Pool {
 }
 
 /**
- * Primary connection pool – handles all write operations
+ * Primary connection pool – now routes through PgBouncer for transaction-level pooling
+ * This significantly reduces the number of direct connections to Postgres
  * (INSERT, UPDATE, DELETE) and read operations when no replica is available.
  */
 export const pool = new Pool({
@@ -232,12 +235,13 @@ export async function queryRead<T extends import("pg").QueryResultRow = any>(
     }
   }
 
-  // Fall back: use primary pool
+  // Fall back: use primary pool (which goes through PgBouncer)
   return pool.query<T>(text, params);
 }
 
 /**
  * Execute a write SQL query (INSERT / UPDATE / DELETE) against the primary pool.
+ * All writes now route through PgBouncer via the primary pool connection.
  *
  * @param text   - The parameterised SQL query string
  * @param params - Optional query parameters
@@ -270,4 +274,64 @@ export async function checkReplicaHealth(): Promise<
       }
     }),
   );
+}
+
+/**
+ * Smart query router: automatically detects read-only (SELECT) queries and
+ * routes them to replica pools, while routing writes (INSERT/UPDATE/DELETE) to primary.
+ * This enables transparent replica usage without changing existing code patterns.
+ *
+ * @param text   - The parameterised SQL query string
+ * @param params - Optional query parameters
+ */
+export async function querySmart<T extends import("pg").QueryResultRow = any>(
+  text: string,
+  params?: unknown[],
+): Promise<import("pg").QueryResult<T>> {
+  // Auto-detect if this is a read-only query
+  if (isReadOnlyQuery(text)) {
+    return queryRead<T>(text, params);
+  } else {
+    return queryWrite<T>(text, params);
+  }
+}
+
+/**
+ * Get PgBouncer pool statistics
+ * Queries PgBouncer admin database to get connection pool metrics
+ */
+export async function getPgBouncerStats(): Promise<{
+  activeConnections: number;
+  idleConnections: number;
+  totalConnections: number;
+  clientConnections: number;
+}> {
+  try {
+    // Query PgBouncer stats database (special admin database)
+    const pgbouncerPool = new Pool({
+      connectionString: process.env.PGBOUNCER_ADMIN_URL || "postgresql://user:password@localhost:6432/pgbouncer",
+    });
+
+    const result = await pgbouncerPool.query(
+      "SELECT sum(cl_active) as active, sum(cl_idle) as idle, sum(sv_active) as sv_active, sum(sv_idle) as sv_idle FROM pgbouncer.client_lookup;",
+    );
+
+    await pgbouncerPool.end();
+
+    const row = result.rows[0] || {};
+    return {
+      activeConnections: parseInt(row.sv_active || 0),
+      idleConnections: parseInt(row.sv_idle || 0),
+      totalConnections: (parseInt(row.sv_active || 0) + parseInt(row.sv_idle || 0)),
+      clientConnections: (parseInt(row.cl_active || 0) + parseInt(row.cl_idle || 0)),
+    };
+  } catch (err) {
+    console.warn("Failed to get PgBouncer stats:", err);
+    return {
+      activeConnections: 0,
+      idleConnections: 0,
+      totalConnections: 0,
+      clientConnections: 0,
+    };
+  }
 }

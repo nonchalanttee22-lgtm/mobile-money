@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { Pool } from "pg";
-import rateLimit from "express-rate-limit";
+import { sep12RateLimiter } from "../middleware/rateLimit";
 import { z } from "zod";
 import KYCService, { KYCLevel, KYCStatus, DocumentType } from "../services/kyc";
 
@@ -556,17 +556,7 @@ export const createSep12Router = (db: Pool): Router => {
   const sep12Service = new Sep12Service(db);
 
   // Rate limiter for SEP-12 endpoints
-  const sep12Limiter = process.env.NODE_ENV === "test"
-    ? (req: any, res: any, next: any) => next()
-    : rateLimit({
-        windowMs: 60 * 1000,
-        max: 20,
-        standardHeaders: true,
-        legacyHeaders: false,
-        message: {
-          error: "Too many requests, please try again later",
-        },
-      });
+  const sep12Limiter = sep12RateLimiter;
 
   /**
    * GET /customer

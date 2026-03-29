@@ -1,4 +1,4 @@
-import { pool } from "../config/database";
+import { pool, queryRead, queryWrite } from "../config/database";
 import { encrypt, decrypt } from "../utils/encryption";
 
 // ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ export interface ReportFilter {
 export class DisputeModel {
   /** Create a new dispute record. */
   async create(input: CreateDisputeInput): Promise<Dispute> {
-    const result = await pool.query<Dispute>(
+    const result = await queryWrite<Dispute>(
       `INSERT INTO disputes (transaction_id, reason, reported_by, priority, category)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING
@@ -140,7 +140,7 @@ export class DisputeModel {
 
   /** Find a dispute by its ID (without notes). */
   async findById(disputeId: string): Promise<Dispute | null> {
-    const result = await pool.query<Dispute>(
+    const result = await queryRead<Dispute>(
       `SELECT
          id,
          transaction_id  AS "transactionId",
@@ -171,7 +171,7 @@ export class DisputeModel {
 
   /** Find a dispute with all its notes. */
   async findByIdWithNotes(disputeId: string): Promise<DisputeWithNotes | null> {
-    const disputeResult = await pool.query<Dispute>(
+    const disputeResult = await queryRead<Dispute>(
       `SELECT
          id,
          transaction_id  AS "transactionId",
@@ -195,7 +195,7 @@ export class DisputeModel {
     const disputeRow = disputeResult.rows[0];
     if (!disputeRow) return null;
 
-    const notesResult = await pool.query<DisputeNote>(
+    const notesResult = await queryRead<DisputeNote>(
       `SELECT
          id,
          dispute_id  AS "disputeId",
@@ -227,7 +227,7 @@ export class DisputeModel {
     if (!dispute) return null;
 
     // Get evidence
-    const evidenceResult = await pool.query<DisputeEvidence>(
+    const evidenceResult = await queryRead<DisputeEvidence>(
       `SELECT
          id,
          dispute_id    AS "disputeId",
@@ -246,7 +246,7 @@ export class DisputeModel {
     );
 
     // Get timeline
-    const timelineResult = await pool.query<DisputeTimelineEvent>(
+    const timelineResult = await queryRead<DisputeTimelineEvent>(
       `SELECT
          id,
          dispute_id    AS "disputeId",
@@ -274,7 +274,7 @@ export class DisputeModel {
   async findActiveByTransactionId(
     transactionId: string,
   ): Promise<Dispute | null> {
-    const result = await pool.query<Dispute>(
+    const result = await queryRead<Dispute>(
       `SELECT
          id,
          transaction_id  AS "transactionId",
@@ -340,7 +340,7 @@ export class DisputeModel {
       throw new Error('No fields to update');
     }
 
-    const result = await pool.query<Dispute>(
+    const result = await queryWrite<Dispute>(
       `UPDATE disputes
        SET ${setParts.join(', ')}
        WHERE id = $1
@@ -371,7 +371,7 @@ export class DisputeModel {
 
   /** Assign a dispute to a support agent. */
   async assign(disputeId: string, agentName: string): Promise<Dispute> {
-    const result = await pool.query<Dispute>(
+    const result = await queryWrite<Dispute>(
       `UPDATE disputes
        SET assigned_to = $2
        WHERE id = $1
@@ -411,7 +411,7 @@ export class DisputeModel {
     uploadedBy: string,
     description?: string,
   ): Promise<DisputeEvidence> {
-    const result = await pool.query<DisputeEvidence>(
+    const result = await queryWrite<DisputeEvidence>(
       `INSERT INTO dispute_evidence (dispute_id, file_name, file_type, file_size, s3_key, s3_url, uploaded_by, description)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING
@@ -432,7 +432,7 @@ export class DisputeModel {
 
   /** Get all evidence for a dispute. */
   async getEvidence(disputeId: string): Promise<DisputeEvidence[]> {
-    const result = await pool.query<DisputeEvidence>(
+    const result = await queryRead<DisputeEvidence>(
       `SELECT
          id,
          dispute_id    AS "disputeId",
@@ -454,7 +454,7 @@ export class DisputeModel {
 
   /** Find disputes approaching SLA deadline. */
   async findSlaWarningCandidates(): Promise<Dispute[]> {
-    const result = await pool.query<Dispute>(
+    const result = await queryRead<Dispute>(
       `SELECT
          id,
          transaction_id  AS "transactionId",
@@ -481,7 +481,7 @@ export class DisputeModel {
 
   /** Mark SLA warning as sent. */
   async markSlaWarningSent(disputeId: string): Promise<void> {
-    await pool.query(
+    await queryWrite(
       `UPDATE disputes SET sla_warning_sent = TRUE WHERE id = $1`,
       [disputeId],
     );
@@ -489,7 +489,7 @@ export class DisputeModel {
 
   /** Find overdue disputes. */
   async findOverdueDisputes(): Promise<Dispute[]> {
-    const result = await pool.query<Dispute>(
+    const result = await queryRead<Dispute>(
       `SELECT
          id,
          transaction_id  AS "transactionId",
@@ -519,7 +519,7 @@ export class DisputeModel {
     author: string,
     note: string,
   ): Promise<DisputeNote> {
-    const result = await pool.query<DisputeNote>(
+    const result = await queryWrite<DisputeNote>(
       `INSERT INTO dispute_notes (dispute_id, author, note)
        VALUES ($1, $2, $3)
        RETURNING
@@ -559,7 +559,7 @@ export class DisputeModel {
     const where =
       conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    const result = await pool.query<DisputeReportRow>(
+    const result = await queryRead<DisputeReportRow>(
       `SELECT
          status,
          COUNT(*)::text                                              AS count,

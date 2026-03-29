@@ -104,3 +104,26 @@ export const activeConnections = new Gauge({
 });
 
 export { register };
+
+// Cache Metrics
+export const cacheHitsTotal = new Counter({
+  name: "cache_hits_total",
+  help: "Total number of cache hits",
+  labelNames: ["route"],
+  registers: [register],
+});
+
+export const cacheMissesTotal = new Counter({
+  name: "cache_misses_total",
+  help: "Total number of cache misses",
+  labelNames: ["route"],
+  registers: [register],
+});
+
+// A gauge that mirrors the hit ratio for easier scraping; updated on each hit/miss
+export const cacheHitRatio = new Gauge({
+  name: "cache_hit_ratio",
+  help: "Cache hit ratio (hits / (hits+misses))",
+  labelNames: ["route"],
+  registers: [register],
+});

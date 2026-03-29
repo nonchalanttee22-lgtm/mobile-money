@@ -11,16 +11,16 @@ import { StellarService } from "../services/stellar/stellarService";
 import { EmailService } from "../services/email";
 import { UserModel } from "../models/users";
 import { withRetry } from "../services/retry";
-import { SmsService } from "../services/sms";
+import { WhatsappService } from "../services/whatsapp";
 import { notifyTransactionWebhook, WebhookService } from "../services/webhook";
 import { pushNotificationService } from "../services/push";
-
+import { capturePersistentFailure } from "./dlq";
 const transactionModel = new TransactionModel();
 const mobileMoneyService = new MobileMoneyService();
 const stellarService = new StellarService();
 const emailService = new EmailService();
 const userModel = new UserModel();
-const smsService = new SmsService();
+const whatsappService = new WhatsappService();
 const webhookService = new WebhookService();
 const pushService = pushNotificationService;
 
@@ -166,7 +166,7 @@ export const transactionWorker = new Worker<
       try {
         const txRow = await transactionModel.findById(transactionId);
         const ref = txRow?.referenceNumber ?? transactionId;
-        await smsService.notifyTransactionEvent(phoneNumber, {
+        await whatsappService.notifyTransactionEvent(phoneNumber, {
           referenceNumber: ref,
           type,
           amount: String(amount),
@@ -175,7 +175,7 @@ export const transactionWorker = new Worker<
           errorMessage,
         });
       } catch (smsErr) {
-        console.error(`[${job.id}] SMS notification error`, smsErr);
+        console.error(`[${job.id}] Notification error`, smsErr);
       }
     };
 
@@ -315,6 +315,10 @@ transactionWorker.on(
       `[${job?.id}] Job failed after ${job?.attemptsMade} attempts:`,
       error.message,
     );
+
+    if (job) {
+      capturePersistentFailure(job).catch(err => console.error('[DLQ] Error capturing failure:', err));
+    }
   },
 );
 

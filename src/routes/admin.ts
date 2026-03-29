@@ -6,6 +6,11 @@ import {
   validateDashboardConfig,
   DASHBOARD_CONFIG_VALIDATION_ERRORS,
 } from "../utils/dashboardConfig";
+import {
+  rateLimitExport,
+  rateLimitListQueries,
+  RATE_LIMIT_CONFIG,
+} from "../middleware/rateLimit";
 import { MobileMoneyService } from "../services/mobilemoney/mobileMoneyService";
 import { getQueueStats } from "../queue/transactionQueue";
 import { redisClient } from "../config/redis";
@@ -16,6 +21,13 @@ import {
   parseCSV,
   reconcileTransactions,
 } from "../services/csvReconciliation";
+import {
+  getTransactionResolutionPercentiles,
+  getDisputeResolutionPercentiles,
+  getTransactionResolutionTrends,
+  getDisputeResolutionTrends,
+} from "../services/metrics";
+import { dlqInspectorHandler } from "../queue/dlq";
 
 const router = Router();
 const IMPERSONATION_TOKEN_EXPIRES_IN = "15m";
@@ -111,11 +123,7 @@ const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
   next();
 };
 
-const requireSuperAdmin = (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
+const requireSuperAdmin = (req: Request, res: Response, next: NextFunction) => {
   const user = (req as AuthRequest).user;
 
   if (!user || !isSuperAdminRole(user.role)) {
@@ -166,6 +174,68 @@ const paginate = <T>(data: T[], page: number, limit: number) => {
 
 /**
  * =========================
+ * METRICS
+ * =========================
+ */
+
+// GET /api/admin/metrics/transactions/resolution
+router.get(
+  "/metrics/transactions/resolution",
+  requireAdmin,
+  logAdminAction("GET_TRANSACTION_RESOLUTION_METRICS"),
+  async (req: Request, res: Response) => {
+    try {
+      const daysBack = parseInt(req.query.days as string) || 30;
+      const metrics = await getTransactionResolutionPercentiles(daysBack);
+      const trends = await getTransactionResolutionTrends(7);
+
+      res.json({
+        metrics,
+        trends,
+        period: `${daysBack} days`,
+        sla_threshold_ms: 24 * 60 * 60 * 1000,
+        sla_threshold_hours: 24,
+      });
+    } catch (err) {
+      console.error("Error fetching transaction resolution metrics:", err);
+      res.status(500).json({
+        message: "Failed to retrieve transaction resolution metrics",
+        error: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  },
+);
+
+// GET /api/admin/metrics/disputes/resolution
+router.get(
+  "/metrics/disputes/resolution",
+  requireAdmin,
+  logAdminAction("GET_DISPUTE_RESOLUTION_METRICS"),
+  async (req: Request, res: Response) => {
+    try {
+      const daysBack = parseInt(req.query.days as string) || 30;
+      const metrics = await getDisputeResolutionPercentiles(daysBack);
+      const trends = await getDisputeResolutionTrends(7);
+
+      res.json({
+        metrics,
+        trends,
+        period: `${daysBack} days`,
+        sla_threshold_ms: 24 * 60 * 60 * 1000,
+        sla_threshold_hours: 24,
+      });
+    } catch (err) {
+      console.error("Error fetching dispute resolution metrics:", err);
+      res.status(500).json({
+        message: "Failed to retrieve dispute resolution metrics",
+        error: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  },
+);
+
+/**
+ * =========================
  * USERS
  * =========================
  */
@@ -174,6 +244,7 @@ const paginate = <T>(data: T[], page: number, limit: number) => {
 router.get(
   "/users",
   requireAdmin,
+  rateLimitListQueries,
   logAdminAction("LIST_USERS"),
   (req: Request, res: Response) => {
     const page = Number(req.query.page) || 1;
@@ -184,7 +255,6 @@ router.get(
     res.json(result);
   },
 );
-
 // GET /api/admin/users/:id
 router.get(
   "/users/:id",
@@ -200,7 +270,6 @@ router.get(
     res.json(user);
   },
 );
-
 // POST /api/admin/users/:id/impersonation-token
 router.post(
   "/users/:id/impersonation-token",
@@ -294,6 +363,8 @@ router.post(
   },
 );
 
+export default router;
+
 // PUT /api/admin/users/:id
 router.put(
   "/users/:id",
@@ -347,13 +418,13 @@ router.post(
 
       // Validate reason
       if (!reason || typeof reason !== "string" || reason.trim().length === 0) {
-        return res.status(400).json({ 
-          message: "A reason is required for freezing an account" 
+        return res.status(400).json({
+          message: "A reason is required for freezing an account",
         });
       }
 
       const userModel = new UserModel();
-      
+
       // Check if user exists
       const user = await userModel.findById(userId);
       if (!user) {
@@ -362,8 +433,8 @@ router.post(
 
       // Check if already frozen
       if (user.status === "frozen") {
-        return res.status(400).json({ 
-          message: "User account is already frozen" 
+        return res.status(400).json({
+          message: "User account is already frozen",
         });
       }
 
@@ -374,11 +445,13 @@ router.post(
         adminUser.id,
         reason.trim(),
         req.ip,
-        req.get("user-agent")
+        req.get("user-agent"),
       );
 
       if (!updatedUser) {
-        return res.status(500).json({ message: "Failed to freeze user account" });
+        return res
+          .status(500)
+          .json({ message: "Failed to freeze user account" });
       }
 
       console.log(`[ADMIN] User account frozen: ${userId}`, {
@@ -388,12 +461,12 @@ router.post(
         timestamp: new Date().toISOString(),
       });
 
-      res.json({ 
+      res.json({
         message: "User account frozen successfully",
         user: {
           id: updatedUser.id,
           status: updatedUser.status,
-        }
+        },
       });
     } catch (error) {
       console.error("Error freezing user account:", error);
@@ -419,13 +492,13 @@ router.post(
 
       // Validate reason
       if (!reason || typeof reason !== "string" || reason.trim().length === 0) {
-        return res.status(400).json({ 
-          message: "A reason is required for unfreezing an account" 
+        return res.status(400).json({
+          message: "A reason is required for unfreezing an account",
         });
       }
 
       const userModel = new UserModel();
-      
+
       // Check if user exists
       const user = await userModel.findById(userId);
       if (!user) {
@@ -434,8 +507,8 @@ router.post(
 
       // Check if not frozen
       if (user.status !== "frozen") {
-        return res.status(400).json({ 
-          message: "User account is not frozen" 
+        return res.status(400).json({
+          message: "User account is not frozen",
         });
       }
 
@@ -446,11 +519,13 @@ router.post(
         adminUser.id,
         reason.trim(),
         req.ip,
-        req.get("user-agent")
+        req.get("user-agent"),
       );
 
       if (!updatedUser) {
-        return res.status(500).json({ message: "Failed to unfreeze user account" });
+        return res
+          .status(500)
+          .json({ message: "Failed to unfreeze user account" });
       }
 
       console.log(`[ADMIN] User account unfrozen: ${userId}`, {
@@ -460,12 +535,12 @@ router.post(
         timestamp: new Date().toISOString(),
       });
 
-      res.json({ 
+      res.json({
         message: "User account unfrozen successfully",
         user: {
           id: updatedUser.id,
           status: updatedUser.status,
-        }
+        },
       });
     } catch (error) {
       console.error("Error unfreezing user account:", error);
@@ -483,7 +558,7 @@ router.get(
     try {
       const userId = req.params.id;
       const userModel = new UserModel();
-      
+
       // Check if user exists
       const user = await userModel.findById(userId);
       if (!user) {
@@ -592,6 +667,7 @@ router.get(
 router.put(
   "/transactions/:id",
   requireAdmin,
+  rateLimitListQueries,
   logAdminAction("UPDATE_TRANSACTION"),
   (req: Request, res: Response) => {
     const tx = transactions.find((t) => t.id === req.params.id);
@@ -616,6 +692,15 @@ router.patch(
 
 /**
  * =========================
+ * QUEUES & DLQ
+ * =========================
+ */
+
+// GET /api/admin/queues/dlq
+router.get("/queues/dlq", requireAdmin, logAdminAction("VIEW_DLQ"), dlqInspectorHandler);
+
+/**
+ * =========================
  * CSV RECONCILIATION
  * =========================
  */
@@ -625,7 +710,7 @@ router.post(
   "/reconcile",
   requireAdmin,
   logAdminAction("CSV_RECONCILIATION"),
-  csvUpload.single("csv"),
+  csvUpload.single("csv") as any,
   async (req: Request, res: Response) => {
     try {
       if (!req.file) {
@@ -771,3 +856,63 @@ router.get(
   },
 );
 
+/**
+ * =========================
+ * DATA EXPORT
+ * =========================
+ */
+
+// POST /api/admin/export/users
+router.post(
+  "/export/users",
+  requireAdmin,
+  rateLimitExport,
+  logAdminAction("EXPORT_USERS"),
+  (req: Request, res: Response) => {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+
+    const result = paginate(users, page, limit);
+
+    // Set export headers
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", 'attachment; filename="users-export.json"');
+
+    res.json({
+      exportedAt: new Date().toISOString(),
+      exportedBy: (req as AuthRequest).user?.id,
+      dataType: "users",
+      ...result,
+    });
+  },
+);
+
+// POST /api/admin/export/transactions
+router.post(
+  "/export/transactions",
+  requireAdmin,
+  rateLimitExport,
+  logAdminAction("EXPORT_TRANSACTIONS"),
+  (req: Request, res: Response) => {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+
+    const result = paginate(transactions, page, limit);
+
+    // Set export headers
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="transactions-export.json"',
+    );
+
+    res.json({
+      exportedAt: new Date().toISOString(),
+      exportedBy: (req as AuthRequest).user?.id,
+      dataType: "transactions",
+      ...result,
+    });
+  },
+);
+
+export const adminRoutes = router;

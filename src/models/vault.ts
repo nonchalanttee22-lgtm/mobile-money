@@ -1,4 +1,4 @@
-import { pool } from "../config/database";
+import { pool, queryRead, queryWrite } from "../config/database";
 
 export interface Vault {
   id: string;
@@ -85,7 +85,7 @@ export class VaultModel {
       throw new Error("Vault description cannot exceed 1000 characters");
     }
 
-    const result = await pool.query(
+    const result = await queryWrite(
       `INSERT INTO vaults (user_id, name, description, target_amount)
        VALUES ($1, $2, $3, $4)
        RETURNING ${VAULT_SELECT_COLUMNS}`,
@@ -101,7 +101,7 @@ export class VaultModel {
   }
 
   async findById(id: string): Promise<Vault | null> {
-    const result = await pool.query(
+    const result = await queryRead(
       `SELECT ${VAULT_SELECT_COLUMNS}
        FROM vaults
        WHERE id = $1`,
@@ -121,12 +121,12 @@ export class VaultModel {
 
     query += " ORDER BY created_at ASC";
 
-    const result = await pool.query(query, params);
+    const result = await queryRead(query, params);
     return result.rows;
   }
 
   async findByUserAndName(userId: string, name: string): Promise<Vault | null> {
-    const result = await pool.query(
+    const result = await queryRead(
       `SELECT ${VAULT_SELECT_COLUMNS}
        FROM vaults
        WHERE user_id = $1 AND name = $2`,
@@ -139,7 +139,7 @@ export class VaultModel {
   async updateBalance(
     vaultId: string,
     newBalance: string,
-    client = pool,
+    client: any = pool,
   ): Promise<void> {
     await client.query(
       `UPDATE vaults 
@@ -193,7 +193,7 @@ export class VaultModel {
     fields.push(`updated_at = CURRENT_TIMESTAMP`);
     values.push(id);
 
-    const result = await pool.query(
+    const result = await queryWrite(
       `UPDATE vaults 
        SET ${fields.join(", ")}
        WHERE id = $${paramIndex}
@@ -213,13 +213,13 @@ export class VaultModel {
       throw new Error("Cannot delete vault with non-zero balance");
     }
 
-    const result = await pool.query("DELETE FROM vaults WHERE id = $1", [id]);
-    return result.rowCount > 0;
+    const result = await queryWrite("DELETE FROM vaults WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
   async createVaultTransaction(
     data: VaultTransferInput,
-    client = pool,
+    client: any = pool,
   ): Promise<VaultTransaction> {
     const result = await client.query(
       `INSERT INTO vault_transactions (vault_id, user_id, type, amount, description, reference_id)
@@ -246,7 +246,7 @@ export class VaultModel {
     const capped = Math.min(Math.max(limit, 1), 100);
     const off = Math.max(offset, 0);
 
-    const result = await pool.query(
+    const result = await queryRead(
       `SELECT ${VAULT_TRANSACTION_SELECT_COLUMNS}
        FROM vault_transactions
        WHERE vault_id = $1
@@ -260,7 +260,7 @@ export class VaultModel {
 
   async getUserBalanceSummary(userId: string): Promise<UserBalanceSummary> {
     // Get main balance from completed transactions
-    const mainBalanceResult = await pool.query(
+    const mainBalanceResult = await queryRead(
       `SELECT COALESCE(SUM(
          CASE 
            WHEN type = 'deposit' THEN amount::numeric
@@ -278,7 +278,7 @@ export class VaultModel {
     const mainBalance = mainBalanceResult.rows[0]?.balance || "0";
 
     // Get vault balances
-    const vaultBalancesResult = await pool.query(
+    const vaultBalancesResult = await queryRead(
       `SELECT id, name, balance::text AS balance
        FROM vaults
        WHERE user_id = $1 AND is_active = true
