@@ -324,7 +324,10 @@ async function processTransactionRequest(
 
     if (!limitCheck.allowed) {
       const body: LimitExceededErrorResponse = {
-        error: "Transaction limit exceeded",
+        code: "TRANSACTION_LIMIT_EXCEEDED",
+        message: limitCheck.message || "Transaction limit exceeded",
+        message_en: "Transaction limit exceeded",
+        timestamp: new Date().toISOString(),
         details: {
           kycLevel: limitCheck.kycLevel,
           dailyLimit: limitCheck.dailyLimit,
