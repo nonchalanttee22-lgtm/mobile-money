@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { generateToken } from "../auth/jwt";
-import { updateAdminNotesHandler } from "../controllers/transactionController";
+import { updateAdminNotesHandler, refundTransactionHandler } from "../controllers/transactionController";
 import {
   DashboardConfig,
   validateDashboardConfig,
@@ -688,6 +688,14 @@ router.patch(
   requireAdmin,
   logAdminAction("UPDATE_TRANSACTION_ADMIN_NOTES"),
   updateAdminNotesHandler,
+);
+
+// POST /api/admin/transactions/:id/refund
+router.post(
+  "/transactions/:id/refund",
+  requireAdmin,
+  logAdminAction("REFUND_TRANSACTION"),
+  refundTransactionHandler,
 );
 
 /**

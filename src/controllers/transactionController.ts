@@ -577,6 +577,53 @@ export const updateNotesHandler = async (req: Request, res: Response) => {
   }
 };
 
+export const refundTransactionHandler = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const transaction = await transactionModel.findById(id);
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+
+    if (transaction.type !== "withdraw") {
+      return res.status(400).json({
+        error: "Only withdrawal transactions can be refunded",
+      });
+    }
+
+    if (transaction.status !== TransactionStatus.Failed) {
+      return res.status(400).json({
+        error: `Cannot refund transaction with status '${transaction.status}'. Only failed transactions are eligible.`,
+      });
+    }
+
+    const amount = parseFloat(transaction.amount);
+    const { calculateFee } = await import("../utils/fees");
+    const { fee } = await calculateFee(amount);
+    const refundAmount = parseFloat((amount - fee).toFixed(2));
+
+    if (refundAmount <= 0) {
+      return res.status(400).json({
+        error: "Refund amount after fees is zero or negative",
+      });
+    }
+
+    await transactionModel.updateStatus(id, TransactionStatus.Completed);
+
+    return res.json({
+      message: "Refund processed successfully",
+      transactionId: id,
+      originalAmount: amount,
+      feeDeducted: fee,
+      refundAmount,
+    });
+  } catch (err) {
+    console.error("Refund error:", err);
+    return res.status(500).json({ error: "Failed to process refund" });
+  }
+};
+
 export const updateAdminNotesHandler = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
