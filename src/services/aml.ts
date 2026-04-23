@@ -7,7 +7,8 @@ export type AMLAlertSeverity = "medium" | "high";
 export type AMLRule =
   | "single_transaction_threshold"
   | "daily_total_threshold"
-  | "rapid_structuring";
+  | "rapid_structuring"
+  | "sanction_match";
 
 export interface AMLTransactionRecord {
   id: string;
@@ -97,6 +98,8 @@ const defaultConfig: AMLConfig = {
   alertBufferSize: Number(process.env.AML_ALERT_BUFFER_SIZE || 5000),
 };
 
+import { sanctionService } from "./sanctionService";
+
 function toISODate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -166,6 +169,24 @@ export class AMLService {
         createdAt: safeDate(row.createdAt),
       }))
       .filter((row) => Number.isFinite(row.amount) && row.amount >= 0);
+  }
+
+  private async fetchUserName(userId: string): Promise<string | null> {
+    const query = `
+      SELECT applicant_data->>'first_name' as "firstName", applicant_data->>'last_name' as "lastName"
+      FROM kyc_applicants
+      WHERE user_id = $1
+      LIMIT 1
+    `;
+    try {
+      const result = await pool.query<{ firstName: string; lastName: string }>(query, [userId]);
+      if (result.rows.length === 0) return null;
+      const { firstName, lastName } = result.rows[0];
+      return `${firstName || ""} ${lastName || ""}`.trim();
+    } catch (error) {
+      console.error(`Failed to fetch user name for AML: ${error}`);
+      return null;
+    }
   }
 
   evaluateTransaction(
@@ -250,7 +271,6 @@ export class AMLService {
     };
 
     this.recordAlert(alert);
-    this.logAlert(alert, current);
 
     return { flagged: true, alert, ruleHits };
   }
@@ -259,12 +279,58 @@ export class AMLService {
     transaction: AMLTransactionRecord,
   ): Promise<AMLMonitoringResult> {
     const since = this.getLookbackWindowStart(transaction.createdAt);
-    const recent = await this.fetchRecentTransactions(
-      transaction.userId,
-      since,
-      transaction.id,
-    );
-    return this.evaluateTransaction(transaction, recent);
+    const [recent, userName] = await Promise.all([
+      this.fetchRecentTransactions(
+        transaction.userId,
+        since,
+        transaction.id,
+      ),
+      this.fetchUserName(transaction.userId),
+    ]);
+
+    const result = this.evaluateTransaction(transaction, recent);
+
+    if (userName) {
+      const sanctionMatches = await sanctionService.searchSanctions(userName);
+      if (sanctionMatches.length > 0) {
+        const topMatch = sanctionMatches[0];
+        const sanctionHit: AMLRuleHit = {
+          rule: "sanction_match",
+          message: `Potential sanction match: "${topMatch.entity.name}" (Score: ${topMatch.score.toFixed(2)}) from ${topMatch.entity.source}`,
+          observed: topMatch.score,
+          threshold: 0.85,
+        };
+
+        result.flagged = true;
+        result.ruleHits.push(sanctionHit);
+
+        if (!result.alert) {
+          const nowIso = new Date().toISOString();
+          result.alert = {
+            id: crypto.randomUUID(),
+            transactionId: transaction.id,
+            userId: transaction.userId,
+            severity: "high",
+            status: "pending_review",
+            ruleHits: [sanctionHit],
+            reasons: [sanctionHit.message],
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          };
+          this.recordAlert(result.alert);
+        } else {
+          result.alert.severity = "high";
+          result.alert.ruleHits.push(sanctionHit);
+          result.alert.reasons.push(sanctionHit.message);
+        }
+      }
+    }
+
+    if (result.flagged && result.alert) {
+      this.logAlert(result.alert, transaction);
+    }
+
+    return result;
   }
 
   getAlerts(filter?: AMLAlertFilter): AMLAlert[] {
@@ -320,6 +386,7 @@ export class AMLService {
       single_transaction_threshold: 0,
       daily_total_threshold: 0,
       rapid_structuring: 0,
+      sanction_match: 0,
     };
 
     const dailyMap = new Map<string, number>();
