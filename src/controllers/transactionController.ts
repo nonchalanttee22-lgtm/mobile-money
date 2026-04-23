@@ -25,8 +25,6 @@ import {
   TransactionResponse,
 } from "../types/api";
 
-import { validatePhoneProviderMatch } from "../utils/phoneUtils";
-
 const IDEMPOTENCY_TTL_HOURS = Number(
   process.env.IDEMPOTENCY_KEY_TTL_HOURS || 24,
 );
@@ -77,6 +75,10 @@ export const transactionSchema = z.object({
     .string()
     .regex(/^G[A-Z2-7]{55}$/, { message: "Invalid Stellar address format" }),
   userId: z.string().nonempty({ message: "userId is required" }),
+  notes: z
+    .string()
+    .max(256, { message: "Note cannot exceed 256 characters" })
+    .optional(),
 });
 
 export const validateTransaction = (
