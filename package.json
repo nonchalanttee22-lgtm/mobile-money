@@ -49,9 +49,6 @@
     "@bull-board/express": "^6.20.6",
     "@sendgrid/mail": "^8.1.6",
     "@sentry/node": "^10.47.0",
-    "@types/passport": "^1.0.17",
-    "@types/passport-saml": "^1.1.7",
-    "@types/speakeasy": "^2.0.10",
     "amqp-connection-manager": "^5.0.0",
     "amqplib": "^0.10.9",
     "apollo-server-core": "^3.13.0",
@@ -161,6 +158,8 @@
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.9",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@types/passport": "^1.0.17",
+    "@types/passport-saml": "^1.1.7"
   }
 }
