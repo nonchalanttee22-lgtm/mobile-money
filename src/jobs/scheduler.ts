@@ -13,6 +13,7 @@ import { runProviderBalanceAlertJob } from "./balances";
 import { runProviderHealthCheckJob } from "./providerHealthCheck";
 import { runKycTierUpgradeJob } from "./kycTierUpgradeJob";
 import { runLiquidityRebalanceJob } from "./liquidityRebalanceJob";
+import { runCrossChainMonitorJob } from "./crossChainMonitorJob";
 
 interface JobConfig {
   name: string;
@@ -86,6 +87,12 @@ const JOBS: JobConfig[] = [
     // Every 15 minutes - auto-transfers between providers when one runs low
     schedule: process.env.LIQUIDITY_REBALANCE_CRON || "*/15 * * * *",
     handler: runLiquidityRebalanceJob,
+  },
+  {
+    name: "cross-chain-monitor",
+    // Every 5 minutes - tracks asset balances across Stellar and mobile money providers
+    schedule: process.env.CROSS_CHAIN_MONITOR_CRON || "*/5 * * * *",
+    handler: runCrossChainMonitorJob,
   },
 ];
 
