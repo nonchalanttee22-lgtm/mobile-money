@@ -34,6 +34,7 @@ import { reportsRoutes } from "./routes/reports";
 import { statementsRoutes } from "./routes/statements";
 import feesRoutes from "./routes/fees";
 import stellarRoutes from "./routes/stellar";
+import htlcRoutes from "./routes/htlc";
 import { createKYCRoutes } from "./routes/kycRoutes";
 import { vaultRoutes } from "./routes/vaults";
 import { adminRoutes } from "./routes/admin";
@@ -357,6 +358,7 @@ app.use("/api/audit", auditRoutes);
 
 app.use("/api/accounting", accountingRoutes);
 app.use("/api/stellar", stellarRoutes);
+app.use("/api/htlc", htlcRoutes);
 
 // GDPR
 app.use("/api/gdpr", privacyRoutes);
