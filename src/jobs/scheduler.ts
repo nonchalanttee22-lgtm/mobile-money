@@ -12,6 +12,7 @@ import { createPagerDutyService } from "../services/pagerDutyService";
 import { runProviderBalanceAlertJob } from "./balances";
 import { runProviderHealthCheckJob } from "./providerHealthCheck";
 import { runKycTierUpgradeJob } from "./kycTierUpgradeJob";
+import { runLiquidityRebalanceJob } from "./liquidityRebalanceJob";
 
 interface JobConfig {
   name: string;
@@ -79,6 +80,12 @@ const JOBS: JobConfig[] = [
     // Every hour - flags users at 80% of their KYC daily limit and notifies them
     schedule: process.env.KYC_TIER_UPGRADE_CRON || "0 * * * *",
     handler: runKycTierUpgradeJob,
+  },
+  {
+    name: "liquidity-rebalance",
+    // Every 15 minutes - auto-transfers between providers when one runs low
+    schedule: process.env.LIQUIDITY_REBALANCE_CRON || "*/15 * * * *",
+    handler: runLiquidityRebalanceJob,
   },
 ];
 

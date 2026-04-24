@@ -29,6 +29,7 @@ import {
   getDisputeResolutionTrends,
 } from "../services/metrics";
 import { dlqInspectorHandler } from "../queue/dlq";
+import { triggerManualTransfer, getLiquidityTransfers } from "../services/liquidityTransferService";
 
 const router = Router();
 const IMPERSONATION_TOKEN_EXPIRES_IN = "15m";
@@ -708,6 +709,61 @@ router.post(
 
 // GET /api/admin/queues/dlq
 router.get("/queues/dlq", requireAdmin, logAdminAction("VIEW_DLQ"), dlqInspectorHandler);
+
+/**
+ * =========================
+ * LIQUIDITY MANAGEMENT
+ * =========================
+ */
+
+// GET /api/admin/liquidity/transfers
+router.get(
+  "/liquidity/transfers",
+  requireAdmin,
+  logAdminAction("LIST_LIQUIDITY_TRANSFERS"),
+  async (req: Request, res: Response) => {
+    try {
+      const limit = Number(req.query.limit) || 50;
+      const offset = Number(req.query.offset) || 0;
+      const transfers = await getLiquidityTransfers(limit, offset);
+      res.json({ transfers });
+    } catch (err) {
+      console.error("[liquidity] Failed to list transfers:", err);
+      res.status(500).json({ message: "Failed to retrieve liquidity transfers" });
+    }
+  },
+);
+
+// POST /api/admin/liquidity/transfers
+router.post(
+  "/liquidity/transfers",
+  requireAdmin,
+  logAdminAction("MANUAL_LIQUIDITY_TRANSFER"),
+  async (req: Request, res: Response) => {
+    try {
+      const { fromProvider, toProvider, amount, note } = req.body;
+      const admin = (req as AuthRequest).user;
+
+      if (!admin) return res.status(401).json({ message: "Authentication required" });
+      if (!fromProvider || !toProvider || !amount) {
+        return res.status(400).json({ message: "fromProvider, toProvider, and amount are required" });
+      }
+      if (fromProvider === toProvider) {
+        return res.status(400).json({ message: "fromProvider and toProvider must be different" });
+      }
+      if (typeof amount !== "number" || amount <= 0) {
+        return res.status(400).json({ message: "amount must be a positive number" });
+      }
+
+      const result = await triggerManualTransfer(fromProvider, toProvider, amount, admin.id, note);
+      res.status(201).json({ message: "Transfer initiated", ...result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Transfer failed";
+      console.error("[liquidity] Manual transfer error:", err);
+      res.status(400).json({ message: msg });
+    }
+  },
+);
 
 /**
  * =========================
