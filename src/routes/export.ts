@@ -313,11 +313,60 @@ export function createExportRoutes(
         }
       };
 
-      try {
-        const filters = parseTransactionExportFilters(req.query);
-        const scopedUserId = getScopedUserId(req);
-        if (scopedUserId) {
-          filters.userId = scopedUserId;
+    const releaseClient = () => {
+      if (client && !released) {
+        released = true;
+        client.release();
+      }
+    };
+
+    try {
+      const filters = parseTransactionExportFilters(req.query);
+      const { text, values } = buildTransactionExportQuery(filters);
+
+      client = await db.connect();
+      const queryStream = createQueryStream(text, values);
+      const rowStream = client.query(queryStream);
+
+      const format = req.query.format === "json" ? "json" : "csv";
+      const filename = `transactions-${new Date().toISOString().slice(0, 10)}.${format}`;
+
+      res.status(200);
+      res.setHeader("Content-Type", format === "json" ? "application/json" : "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`,
+      );
+
+      let transform: Transform;
+      if (format === "csv") {
+        res.write(`${CSV_HEADERS.join(",")}\n`);
+        transform = new Transform({
+          objectMode: true,
+          transform(chunk: Record<string, unknown>, _encoding, callback) {
+            callback(null, transactionRowToCsv(chunk));
+          },
+        });
+      } else {
+        let first = true;
+        res.write("[\n");
+        transform = new Transform({
+          objectMode: true,
+          transform(chunk: Record<string, unknown>, _encoding, callback) {
+            const data = (first ? "" : ",\n") + JSON.stringify(chunk, null, 2);
+            first = false;
+            callback(null, data);
+          },
+          flush(callback) {
+            res.write("\n]");
+            callback();
+          },
+        });
+      }
+
+      res.on("close", () => {
+        if ("destroy" in rowStream && typeof rowStream.destroy === "function") {
+          rowStream.destroy();
         }
         const { text, values } = buildTransactionExportQuery(filters);
 
@@ -351,87 +400,30 @@ export function createExportRoutes(
           releaseClient();
         });
 
-        pipeline(rowStream, csvTransform, res, (error) => {
+      pipeline(
+        rowStream,
+        transform,
+        res,
+        (error) => {
           releaseClient();
           if (error) {
             console.error("Transaction CSV export failed:", error);
           }
-        });
-      } catch (error) {
-        releaseClient();
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Failed to export transactions";
-        const statusCode = message.startsWith("Invalid") ? 400 : 500;
+        },
+      );
+    } catch (error) {
+      releaseClient();
+      const message =
+        error instanceof Error ? error.message : "Failed to export transactions";
+      const statusCode = message.startsWith("Invalid") ? 400 : 500;
+      if (!res.headersSent) {
         res.status(statusCode).json({ error: message });
+      } else {
+        console.error("Error after headers sent:", message);
+        res.end();
       }
-    },
-  );
-
-  router.get(
-    "/export/xlsx",
-    exportRateLimiterMiddleware,
-    requireAuth,
-    async (req: Request, res: Response) => {
-      let client: QueryableClient | null = null;
-      let released = false;
-
-      const releaseClient = () => {
-        if (client && !released) {
-          released = true;
-          client.release();
-        }
-      };
-
-      try {
-        const filters = parseTransactionExportFilters(req.query);
-        const scopedUserId = getScopedUserId(req);
-        if (scopedUserId) {
-          filters.userId = scopedUserId;
-        }
-        const { text, values } = buildTransactionExportQuery(filters);
-
-        client = await db.connect();
-        const queryStream = createQueryStream(text, values);
-        const rowStream = client.query(queryStream);
-
-        const filenameDate = new Date().toISOString().slice(0, 10);
-        const filename = `transactions-${filenameDate}.xlsx`;
-
-        res.status(200);
-        res.setHeader(
-          "Content-Type",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        );
-        res.setHeader(
-          "Content-Disposition",
-          `attachment; filename="${filename}"`,
-        );
-
-        res.on("close", () => {
-          if (
-            "destroy" in rowStream &&
-            typeof rowStream.destroy === "function"
-          ) {
-            rowStream.destroy();
-          }
-          releaseClient();
-        });
-
-        await streamTransactionsAsXlsx(rowStream, res);
-        releaseClient();
-      } catch (error) {
-        releaseClient();
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Failed to export transactions";
-        const statusCode = message.startsWith("Invalid") ? 400 : 500;
-        res.status(statusCode).json({ error: message });
-      }
-    },
-  );
+    }
+  });
 
   return router;
 }
