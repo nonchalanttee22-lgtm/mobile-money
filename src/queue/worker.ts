@@ -170,6 +170,14 @@ async function processTransaction(data: TransactionJobData): Promise<Transaction
   ) => {
     try {
       const txRow = await transactionModel.findById(transactionId);
+      if (!txRow?.userId) return;
+
+      const user = await userModel.findById(txRow.userId);
+      if (user?.smsOptOut) {
+        console.log(`[${transactionId}] SMS notifications skipped (User Opted Out)`);
+        return;
+      }
+
       const ref = txRow?.referenceNumber ?? transactionId;
       await smsService.notifyTransactionEvent(phoneNumber, {
         referenceNumber: ref,

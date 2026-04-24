@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN sms_opt_out BOOLEAN DEFAULT false;

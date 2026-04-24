@@ -1,4 +1,6 @@
 import twilio from "twilio";
+// @ts-ignore
+import africastalking from "africastalking";
 import {
   parsePhoneNumberFromString,
   type CountryCode,
@@ -104,23 +106,30 @@ export interface SmsSendResult {
 }
 
 export class SmsService {
-  private client: ReturnType<typeof twilio> | null = null;
+  private twilioClient: ReturnType<typeof twilio> | null = null;
+  private atClient: any = null;
+  private provider: string;
 
   constructor() {
-    const provider = (process.env.SMS_PROVIDER || "none").toLowerCase();
-    if (provider === "twilio") {
+    this.provider = (process.env.SMS_PROVIDER || "none").toLowerCase();
+    if (this.provider === "twilio") {
       const sid = process.env.TWILIO_ACCOUNT_SID;
       const token = process.env.TWILIO_AUTH_TOKEN;
-      if (sid && token) this.client = twilio(sid, token);
+      if (sid && token) this.twilioClient = twilio(sid, token);
+    } else if (this.provider === "africastalking") {
+      const apiKey = process.env.AFRICASTALKING_API_KEY;
+      const username = process.env.AFRICASTALKING_USERNAME;
+      if (apiKey && username) {
+        this.atClient = africastalking({ apiKey, username });
+      }
     }
   }
 
   shouldSend(): boolean {
     if (process.env.NODE_ENV === "test") return false;
-    const provider = (process.env.SMS_PROVIDER || "none").toLowerCase();
-    if (provider === "none" || provider === "off" || provider === "disabled")
+    if (this.provider === "none" || this.provider === "off" || this.provider === "disabled")
       return false;
-    return provider === "twilio" && this.client !== null;
+    return (this.provider === "twilio" && this.twilioClient !== null) || (this.provider === "africastalking" && this.atClient !== null);
   }
 
   async sendToPhone(toRaw: string, body: string): Promise<SmsSendResult> {
@@ -150,17 +159,40 @@ export class SmsService {
     }
 
     try {
-      const message = await this.client!.messages.create({
-        to,
-        from,
-        body,
-      });
-      console.log("[sms] delivered", {
-        to,
-        sid: message.sid,
-        status: message.status,
-      });
-      return { sent: true, messageSid: message.sid };
+      let messageSidStr = "unknown";
+      
+      if (this.provider === "twilio") {
+        const message = await this.twilioClient!.messages.create({
+          to,
+          from,
+          body,
+        });
+        messageSidStr = message.sid;
+        console.log("[sms] delivered via Twilio", {
+          to,
+          sid: message.sid,
+          status: message.status,
+        });
+      } else if (this.provider === "africastalking") {
+        const result = await this.atClient.SMS.send({
+          to: [to],
+          message: body,
+          from: process.env.AFRICASTALKING_SENDER_ID
+        });
+        const msgData = result?.SMSMessageData?.Recipients?.[0];
+        if (msgData?.status === "Success") {
+          messageSidStr = msgData.messageId;
+        } else {
+          throw new Error(`AT sending failed with status: ${msgData?.status}`);
+        }
+        console.log("[sms] delivered via Africa's Talking", {
+          to,
+          sid: messageSidStr,
+          status: msgData?.status,
+        });
+      }
+
+      return { sent: true, messageSid: messageSidStr };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[sms] send failed", { to, error: msg });

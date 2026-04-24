@@ -13,6 +13,7 @@ export interface User {
   tokenVersion?: number;
   createdAt: Date;
   updatedAt: Date;
+  smsOptOut?: boolean;
   // TODO: The `User` type and database table needs to
   // be update with these fields:  is_active: boolean,   deactivated_at:Date`
 }
@@ -35,6 +36,7 @@ export class UserModel {
       tokenVersion: row.token_version ?? 0,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      smsOptOut: row.sms_opt_out ?? false,
     };
   }
 
@@ -109,6 +111,7 @@ export class UserModel {
         status: row.status,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        smsOptOut: row.sms_opt_out ?? false,
       };
     } catch (error) {
       await client.query('ROLLBACK');
