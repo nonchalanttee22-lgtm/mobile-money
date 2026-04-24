@@ -127,3 +127,18 @@ export const cacheHitRatio = new Gauge({
   labelNames: ["route"],
   registers: [register],
 });
+
+// Cross-Chain Asset Monitoring Metrics
+export const crossChainBalanceGauge = new Gauge({
+  name: "cross_chain_balance",
+  help: "Current asset balance per chain/address",
+  labelNames: ["chain", "asset", "address"],
+  registers: [register],
+});
+
+export const crossChainAnomalyTotal = new Counter({
+  name: "cross_chain_anomaly_total",
+  help: "Number of cross-chain balance anomalies detected",
+  labelNames: ["chain", "asset", "reason"],
+  registers: [register],
+});

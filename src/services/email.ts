@@ -1,5 +1,7 @@
 import sgMail from "@sendgrid/mail";
 import { Transaction } from "../models/transaction";
+import { DailySnapshot } from "../models/snapshot";
+import { GrowthMetrics } from "./snapshotService";
 import { resolveLocale, translate } from "../utils/i18n";
 
 export interface LockoutEmailOptions {
@@ -172,5 +174,68 @@ export class EmailService {
         year: new Date().getFullYear(),
       },
     });
+  }
+
+  async sendManagementSummary(
+    email: string,
+    snapshot: DailySnapshot,
+    growth: GrowthMetrics,
+  ): Promise<void> {
+    const templateId = process.env.SENDGRID_MANAGEMENT_SUMMARY_TEMPLATE_ID;
+    const from = process.env.EMAIL_FROM || '"Mobile Money" <no-reply@mobilemoney.com>';
+
+    if (templateId) {
+      await this.sendEmail({
+        to: email,
+        templateId,
+        dynamicTemplateData: {
+          snapshotDate: snapshot.snapshotDate,
+          totalBalance: snapshot.totalBalance,
+          totalMainBalance: snapshot.totalMainBalance,
+          totalVaultBalance: snapshot.totalVaultBalance,
+          dailyVolume: snapshot.dailyVolume,
+          transactionCount: snapshot.transactionCount,
+          volumeGrowth: growth.volumeGrowth.toFixed(2),
+          balanceGrowth: growth.balanceGrowth.toFixed(2),
+          year: new Date().getFullYear(),
+        },
+      });
+    } else {
+      // Fallback HTML
+      await sgMail.send({
+        from,
+        to: email,
+        subject: `Daily Financial Summary - ${snapshot.snapshotDate}`,
+        html: `
+          <div style="font-family:sans-serif;max-width:600px;margin:0 auto;border:1px solid #eee;padding:20px;">
+            <h2 style="color:#2c3e50;border-bottom:2px solid #3498db;padding-bottom:10px;">Daily Financial Summary</h2>
+            <p><strong>Date:</strong> ${snapshot.snapshotDate}</p>
+            
+            <div style="background:#f9f9f9;padding:15px;border-radius:5px;margin:20px 0;">
+              <h3 style="margin-top:0;color:#2980b9;">Balances</h3>
+              <table style="width:100%;">
+                <tr><td>Total Balance:</td><td style="text-align:right;"><strong>${snapshot.totalBalance}</strong></td></tr>
+                <tr><td style="padding-left:15px;color:#666;">- Main Balance:</td><td style="text-align:right;color:#666;">${snapshot.totalMainBalance}</td></tr>
+                <tr><td style="padding-left:15px;color:#666;">- Vault Balance:</td><td style="text-align:right;color:#666;">${snapshot.totalVaultBalance}</td></tr>
+                <tr><td>Balance Growth (DoD):</td><td style="text-align:right;color:${growth.balanceGrowth >= 0 ? "#27ae60" : "#c0392b"};">${growth.balanceGrowth.toFixed(2)}%</td></tr>
+              </table>
+            </div>
+
+            <div style="background:#f9f9f9;padding:15px;border-radius:5px;margin:20px 0;">
+              <h3 style="margin-top:0;color:#2980b9;">Volume</h3>
+              <table style="width:100%;">
+                <tr><td>Daily Volume:</td><td style="text-align:right;"><strong>${snapshot.dailyVolume}</strong></td></tr>
+                <tr><td>Transaction Count:</td><td style="text-align:right;">${snapshot.transactionCount}</td></tr>
+                <tr><td>Volume Growth (DoD):</td><td style="text-align:right;color:${growth.volumeGrowth >= 0 ? "#27ae60" : "#c0392b"};">${growth.volumeGrowth.toFixed(2)}%</td></tr>
+              </table>
+            </div>
+
+            <p style="color:#999;font-size:12px;margin-top:30px;text-align:center;">
+              &copy; ${new Date().getFullYear()} Mobile Money. This is an automated management report.
+            </p>
+          </div>
+        `,
+      });
+    }
   }
 }
