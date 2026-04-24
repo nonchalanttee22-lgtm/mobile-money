@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { rateLimitExport as exportRateLimiter } from "../middleware/rateLimit";
 import QueryStream from "pg-query-stream";
 import { pipeline, Transform } from "stream";
+import ExcelJS from "exceljs";
 import { pool } from "../config/database";
 import { requireAuth } from "../middleware/auth";
 import { TransactionStatus } from "../models/transaction";
@@ -18,6 +19,7 @@ export interface TransactionExportFilters {
   from?: Date;
   to?: Date;
   tags?: string[];
+  userId?: string;
 }
 
 type QueryStreamFactory = (text: string, values: unknown[]) => unknown;
@@ -74,12 +76,8 @@ export function parseTransactionExportFilters(
   const phoneNumber =
     singleQueryValue(query.phoneNumber as QueryValue) ??
     singleQueryValue(query.phone as QueryValue);
-  const stellarAddress = singleQueryValue(
-    query.stellarAddress as QueryValue,
-  );
-  const referenceNumber = singleQueryValue(
-    query.referenceNumber as QueryValue,
-  );
+  const stellarAddress = singleQueryValue(query.stellarAddress as QueryValue);
+  const referenceNumber = singleQueryValue(query.referenceNumber as QueryValue);
   const from = singleQueryValue(query.from as QueryValue);
   const to = singleQueryValue(query.to as QueryValue);
   const tags = singleQueryValue(query.tags as QueryValue);
@@ -117,14 +115,19 @@ export function parseTransactionExportFilters(
   return filters;
 }
 
-export function buildTransactionExportQuery(filters: TransactionExportFilters): {
+export function buildTransactionExportQuery(
+  filters: TransactionExportFilters,
+): {
   text: string;
   values: unknown[];
 } {
   const whereClauses: string[] = [];
   const values: unknown[] = [];
 
-  const addClause = (clauseFactory: (index: number) => string, value: unknown) => {
+  const addClause = (
+    clauseFactory: (index: number) => string,
+    value: unknown,
+  ) => {
     values.push(value);
     whereClauses.push(clauseFactory(values.length));
   };
@@ -139,15 +142,15 @@ export function buildTransactionExportQuery(filters: TransactionExportFilters): 
     addClause((i) => `stellar_address = $${i}`, filters.stellarAddress);
   }
   if (filters.referenceNumber) {
-    addClause(
-      (i) => `reference_number = $${i}`,
-      filters.referenceNumber,
-    );
+    addClause((i) => `reference_number = $${i}`, filters.referenceNumber);
   }
   if (filters.from) addClause((i) => `created_at >= $${i}`, filters.from);
   if (filters.to) addClause((i) => `created_at <= $${i}`, filters.to);
   if (filters.tags?.length) {
     addClause((i) => `tags @> $${i}::text[]`, filters.tags);
+  }
+  if (filters.userId) {
+    addClause((i) => `user_id = $${i}`, filters.userId);
   }
 
   const whereSql =
@@ -176,13 +179,19 @@ function formatReadableDate(value: unknown): string {
 
   const pad = (n: number) => String(n).padStart(2, "0");
 
-  return [
-    date.getUTCFullYear(),
-    pad(date.getUTCMonth() + 1),
-    pad(date.getUTCDate()),
-  ].join("-") +
+  return (
+    [
+      date.getUTCFullYear(),
+      pad(date.getUTCMonth() + 1),
+      pad(date.getUTCDate()),
+    ].join("-") +
     " " +
-    [pad(date.getUTCHours()), pad(date.getUTCMinutes()), pad(date.getUTCSeconds())].join(":");
+    [
+      pad(date.getUTCHours()),
+      pad(date.getUTCMinutes()),
+      pad(date.getUTCSeconds()),
+    ].join(":")
+  );
 }
 
 function escapeCsvValue(value: unknown): string {
@@ -223,6 +232,62 @@ function defaultQueryStreamFactory(text: string, values: unknown[]): unknown {
   return new QueryStream(text, values, { batchSize: 250 });
 }
 
+function getScopedUserId(req: Request): string | undefined {
+  const requestWithAuth = req as Request & {
+    jwtUser?: { userId?: string; role?: string };
+    user?: { id?: string; role?: string };
+  };
+  const authUserId =
+    requestWithAuth.jwtUser?.userId ?? requestWithAuth.user?.id;
+  const role = requestWithAuth.jwtUser?.role ?? requestWithAuth.user?.role;
+
+  if (!authUserId || role === "admin" || authUserId === "admin-system") {
+    return undefined;
+  }
+
+  return authUserId;
+}
+
+function transactionRowToWorksheetRow(row: Record<string, unknown>): unknown[] {
+  return [
+    row.id ?? "",
+    row.reference_number ?? "",
+    row.type ?? "",
+    row.amount ?? "",
+    row.phone_number ?? "",
+    row.provider ?? "",
+    row.status ?? "",
+    row.stellar_address ?? "",
+    Array.isArray(row.tags) ? row.tags.join("|") : (row.tags ?? ""),
+    row.notes ?? "",
+    row.admin_notes ?? "",
+    row.user_id ?? "",
+    formatReadableDate(row.created_at),
+    formatReadableDate(row.updated_at),
+  ];
+}
+
+async function streamTransactionsAsXlsx(
+  rowStream: NodeJS.ReadableStream,
+  res: Response,
+): Promise<void> {
+  const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
+    stream: res,
+    useStyles: false,
+    useSharedStrings: false,
+  });
+
+  const sheet = workbook.addWorksheet("Transactions");
+  sheet.addRow(CSV_HEADERS).commit();
+
+  for await (const row of rowStream as AsyncIterable<Record<string, unknown>>) {
+    sheet.addRow(transactionRowToWorksheetRow(row)).commit();
+  }
+
+  sheet.commit();
+  await workbook.commit();
+}
+
 const exportRateLimiterMiddleware = exportRateLimiter;
 
 export function createExportRoutes(
@@ -233,71 +298,140 @@ export function createExportRoutes(
   const createQueryStream =
     dependencies.createQueryStream ?? defaultQueryStreamFactory;
 
-  router.get("/export", exportRateLimiterMiddleware, requireAuth, async (req: Request, res: Response) => {
-    let client: QueryableClient | null = null;
-    let released = false;
+  router.get(
+    "/export",
+    exportRateLimiterMiddleware,
+    requireAuth,
+    async (req: Request, res: Response) => {
+      let client: QueryableClient | null = null;
+      let released = false;
 
-    const releaseClient = () => {
-      if (client && !released) {
-        released = true;
-        client.release();
-      }
-    };
-
-    try {
-      const filters = parseTransactionExportFilters(req.query);
-      const { text, values } = buildTransactionExportQuery(filters);
-
-      client = await db.connect();
-      const queryStream = createQueryStream(text, values);
-      const rowStream = client.query(queryStream);
-
-      const filename = `transactions-${new Date().toISOString().slice(0, 10)}.csv`;
-      res.status(200);
-      res.setHeader("Content-Type", "text/csv; charset=utf-8");
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${filename}"`,
-      );
-      res.write(`${CSV_HEADERS.join(",")}\n`);
-
-      const csvTransform = new Transform({
-        objectMode: true,
-        transform(
-          chunk: Record<string, unknown>,
-          _encoding,
-          callback,
-        ) {
-          callback(null, transactionRowToCsv(chunk));
-        },
-      });
-
-      res.on("close", () => {
-        if ("destroy" in rowStream && typeof rowStream.destroy === "function") {
-          rowStream.destroy();
+      const releaseClient = () => {
+        if (client && !released) {
+          released = true;
+          client.release();
         }
-        releaseClient();
-      });
+      };
 
-      pipeline(
-        rowStream,
-        csvTransform,
-        res,
-        (error) => {
+      try {
+        const filters = parseTransactionExportFilters(req.query);
+        const scopedUserId = getScopedUserId(req);
+        if (scopedUserId) {
+          filters.userId = scopedUserId;
+        }
+        const { text, values } = buildTransactionExportQuery(filters);
+
+        client = await db.connect();
+        const queryStream = createQueryStream(text, values);
+        const rowStream = client.query(queryStream);
+
+        const filename = `transactions-${new Date().toISOString().slice(0, 10)}.csv`;
+        res.status(200);
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${filename}"`,
+        );
+        res.write(`${CSV_HEADERS.join(",")}\n`);
+
+        const csvTransform = new Transform({
+          objectMode: true,
+          transform(chunk: Record<string, unknown>, _encoding, callback) {
+            callback(null, transactionRowToCsv(chunk));
+          },
+        });
+
+        res.on("close", () => {
+          if (
+            "destroy" in rowStream &&
+            typeof rowStream.destroy === "function"
+          ) {
+            rowStream.destroy();
+          }
+          releaseClient();
+        });
+
+        pipeline(rowStream, csvTransform, res, (error) => {
           releaseClient();
           if (error) {
-            console.error("Transaction export failed:", error);
+            console.error("Transaction CSV export failed:", error);
           }
-        },
-      );
-    } catch (error) {
-      releaseClient();
-      const message =
-        error instanceof Error ? error.message : "Failed to export transactions";
-      const statusCode = message.startsWith("Invalid") ? 400 : 500;
-      res.status(statusCode).json({ error: message });
-    }
-  });
+        });
+      } catch (error) {
+        releaseClient();
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to export transactions";
+        const statusCode = message.startsWith("Invalid") ? 400 : 500;
+        res.status(statusCode).json({ error: message });
+      }
+    },
+  );
+
+  router.get(
+    "/export/xlsx",
+    exportRateLimiterMiddleware,
+    requireAuth,
+    async (req: Request, res: Response) => {
+      let client: QueryableClient | null = null;
+      let released = false;
+
+      const releaseClient = () => {
+        if (client && !released) {
+          released = true;
+          client.release();
+        }
+      };
+
+      try {
+        const filters = parseTransactionExportFilters(req.query);
+        const scopedUserId = getScopedUserId(req);
+        if (scopedUserId) {
+          filters.userId = scopedUserId;
+        }
+        const { text, values } = buildTransactionExportQuery(filters);
+
+        client = await db.connect();
+        const queryStream = createQueryStream(text, values);
+        const rowStream = client.query(queryStream);
+
+        const filenameDate = new Date().toISOString().slice(0, 10);
+        const filename = `transactions-${filenameDate}.xlsx`;
+
+        res.status(200);
+        res.setHeader(
+          "Content-Type",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        );
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${filename}"`,
+        );
+
+        res.on("close", () => {
+          if (
+            "destroy" in rowStream &&
+            typeof rowStream.destroy === "function"
+          ) {
+            rowStream.destroy();
+          }
+          releaseClient();
+        });
+
+        await streamTransactionsAsXlsx(rowStream, res);
+        releaseClient();
+      } catch (error) {
+        releaseClient();
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to export transactions";
+        const statusCode = message.startsWith("Invalid") ? 400 : 500;
+        res.status(statusCode).json({ error: message });
+      }
+    },
+  );
 
   return router;
 }
