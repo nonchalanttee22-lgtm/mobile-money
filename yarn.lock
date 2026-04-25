@@ -1940,17 +1940,39 @@
   resolved "https://registry.npmjs.org/@nodable/entities/-/entities-2.1.0.tgz"
   integrity sha512-nyT7T3nbMyBI/lvr6L5TyWbFJAI9FTgVRakNoBqCD+PmID8DzFrrNdLLtHMwMszOtqZa8PAOV24ZqDnQrhQINA==
 
-"@opentelemetry/api-logs@<1.0.0", "@opentelemetry/api-logs@0.214.0":
+"@oozcitak/dom@^2.0.2":
+  version "2.0.2"
+  resolved "https://registry.npmjs.org/@oozcitak/dom/-/dom-2.0.2.tgz"
+  integrity sha512-GjpKhkSYC3Mj4+lfwEyI1dqnsKTgwGy48ytZEhm4A/xnH/8z9M3ZVXKr/YGQi3uCLs1AEBS+x5T2JPiueEDW8w==
+  dependencies:
+    "@oozcitak/infra" "^2.0.2"
+    "@oozcitak/url" "^3.0.0"
+    "@oozcitak/util" "^10.0.0"
+
+"@oozcitak/infra@^2.0.2":
+  version "2.0.2"
+  resolved "https://registry.npmjs.org/@oozcitak/infra/-/infra-2.0.2.tgz"
+  integrity sha512-2g+E7hoE2dgCz/APPOEK5s3rMhJvNxSMBrP+U+j1OWsIbtSpWxxlUjq1lU8RIsFJNYv7NMlnVsCuHcUzJW+8vA==
+  dependencies:
+    "@oozcitak/util" "^10.0.0"
+
+"@oozcitak/url@^3.0.0":
+  version "3.0.0"
+  resolved "https://registry.npmjs.org/@oozcitak/url/-/url-3.0.0.tgz"
+  integrity sha512-ZKfET8Ak1wsLAiLWNfFkZc/BraDccuTJKR6svTYc7sVjbR+Iu0vtXdiDMY4o6jaFl5TW2TlS7jbLl4VovtAJWQ==
+  dependencies:
+    "@oozcitak/infra" "^2.0.2"
+    "@oozcitak/util" "^10.0.0"
+
+"@oozcitak/util@^10.0.0":
+  version "10.0.0"
+  resolved "https://registry.npmjs.org/@oozcitak/util/-/util-10.0.0.tgz"
+  integrity sha512-hAX0pT/73190NLqBPPWSdBVGtbY6VOhWYK3qqHqtXQ1gK7kS2yz4+ivsN07hpJ6I3aeMtKP6J6npsEKOAzuTLA==
+
+"@opentelemetry/api-logs@<1.0.0", "@opentelemetry/api-logs@0.207.0", "@opentelemetry/api-logs@0.214.0":
   version "0.214.0"
   resolved "https://registry.npmjs.org/@opentelemetry/api-logs/-/api-logs-0.214.0.tgz"
   integrity sha512-40lSJeqYO8Uz2Yj7u94/SJWE/wONa7rmMKjI1ZcIjgf3MHNHv1OZUCrCETGuaRF62d5pQD1wKIW+L4lmSMTzZA==
-  dependencies:
-    "@opentelemetry/api" "^1.3.0"
-
-"@opentelemetry/api-logs@0.207.0":
-  version "0.207.0"
-  resolved "https://registry.npmjs.org/@opentelemetry/api-logs/-/api-logs-0.207.0.tgz"
-  integrity sha512-lAb0jQRVyleQQGiuuvCOTDVspc14nx6XJjP4FspJ1sNARo3Regq4ZZbrc3rN4b1TYSuUCvgH+UXUPug4SLOqEQ==
   dependencies:
     "@opentelemetry/api" "^1.3.0"
 
@@ -1965,6 +1987,8 @@
   version "1.9.1"
   resolved "https://registry.npmjs.org/@opentelemetry/api/-/api-1.9.1.tgz"
   integrity sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q==
+  dependencies:
+    "@opentelemetry/instrumentation" "^0.207.0"
 
 "@opentelemetry/context-async-hooks@^1.30.1 || ^2.1.0", "@opentelemetry/context-async-hooks@^2.6.1":
   version "2.6.1"
@@ -2979,6 +3003,11 @@
     tweetnacl "^1.0.3"
   optionalDependencies:
     sodium-native "^4.1.1"
+
+"@streamparser/json@^0.0.6":
+  version "0.0.6"
+  resolved "https://registry.npmjs.org/@streamparser/json/-/json-0.0.6.tgz"
+  integrity sha512-vL9EVn/v+OhZ+Wcs6O4iKE9EUpwHUqHmCtNUMWjqp+6dr85+XPOSGTEsqYNq1Vn04uk9SWlOVmx9J48ggJVT2Q==
 
 "@stryker-mutator/api@9.6.1":
   version "9.6.1"
@@ -4660,6 +4689,11 @@ commander@^2.20.3:
   resolved "https://registry.npmjs.org/commander/-/commander-2.20.3.tgz"
   integrity sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ==
 
+commander@^6.2.0:
+  version "6.2.1"
+  resolved "https://registry.npmjs.org/commander/-/commander-6.2.1.tgz"
+  integrity sha512-U7VdrJFnJgo4xjrHpTzu0yrHPGImdsmD95ZlgYSEajAn2JKzDhDTPG9kBTefmObL2w/ngeZnilk+OV9CG3d7UA==
+
 component-emitter@^1.3.1:
   version "1.3.1"
   resolved "https://registry.npmjs.org/component-emitter/-/component-emitter-1.3.1.tgz"
@@ -6066,7 +6100,14 @@ graphql-query-complexity@^1.1.0:
   dependencies:
     lodash.get "^4.4.2"
 
-graphql-subscriptions@^3.0.0:
+graphql-redis-subscriptions@^2.6.1:
+  version "2.7.0"
+  resolved "https://registry.npmjs.org/graphql-redis-subscriptions/-/graphql-redis-subscriptions-2.7.0.tgz"
+  integrity sha512-IK4uCKx1UNhkcnG9lIqFWz9PpltSbuM8RygwGoB/e1HZMuKpAGeqqfHFeLKkQjjubvk4tAdUdx48AUkTAXJ17Q==
+  optionalDependencies:
+    ioredis "^5.3.2"
+
+"graphql-subscriptions@^1.0.0 || ^2.0.0 || ^3.0.0", graphql-subscriptions@^3.0.0:
   version "3.0.0"
   resolved "https://registry.npmjs.org/graphql-subscriptions/-/graphql-subscriptions-3.0.0.tgz"
   integrity sha512-kZCdevgmzDjGAOqH7GlDmQXYAkuHoKpMlJrqF40HMPhUhM5ZWSFSxCwD/nSi6AkaijmMfsFhoJRGJ27UseCvRA==
@@ -6298,10 +6339,10 @@ ignore@^7.0.5:
   resolved "https://registry.npmjs.org/ignore/-/ignore-7.0.5.tgz"
   integrity sha512-Hs59xBNfUIunMFgWAbGX5cq6893IbWg4KnrjbYwX3tx0ztorVgTDA6B2sxf8ejHJ4wz8BqGUMYlnzNBer5NvGg==
 
-import-in-the-middle@^2.0.0:
-  version "2.0.6"
-  resolved "https://registry.npmjs.org/import-in-the-middle/-/import-in-the-middle-2.0.6.tgz"
-  integrity sha512-3vZV3jX0XRFW3EJDTwzWoZa+RH1b8eTTx6YOCjglrLyPuepwoBti1k3L2dKwdCUrnVEfc5CuRuGstaC/uQJJaw==
+import-in-the-middle@^2.0.0, import-in-the-middle@^3.0.0:
+  version "3.0.0"
+  resolved "https://registry.npmjs.org/import-in-the-middle/-/import-in-the-middle-3.0.0.tgz"
+  integrity sha512-OnGy+eYT7wVejH2XWgLRgbmzujhhVIATQH0ztIeRilwHBjTeG3pD+XnH3PKX0r9gJ0BuJmJ68q/oh9qgXnNDQg==
   dependencies:
     acorn "^8.15.0"
     acorn-import-attributes "^1.9.5"
@@ -6312,16 +6353,6 @@ import-in-the-middle@^2.0.6:
   version "2.0.6"
   resolved "https://registry.npmjs.org/import-in-the-middle/-/import-in-the-middle-2.0.6.tgz"
   integrity sha512-3vZV3jX0XRFW3EJDTwzWoZa+RH1b8eTTx6YOCjglrLyPuepwoBti1k3L2dKwdCUrnVEfc5CuRuGstaC/uQJJaw==
-  dependencies:
-    acorn "^8.15.0"
-    acorn-import-attributes "^1.9.5"
-    cjs-module-lexer "^2.2.0"
-    module-details-from-path "^1.0.4"
-
-import-in-the-middle@^3.0.0:
-  version "3.0.0"
-  resolved "https://registry.npmjs.org/import-in-the-middle/-/import-in-the-middle-3.0.0.tgz"
-  integrity sha512-OnGy+eYT7wVejH2XWgLRgbmzujhhVIATQH0ztIeRilwHBjTeG3pD+XnH3PKX0r9gJ0BuJmJ68q/oh9qgXnNDQg==
   dependencies:
     acorn "^8.15.0"
     acorn-import-attributes "^1.9.5"
@@ -6359,7 +6390,7 @@ inherits@2.0.3:
   resolved "https://registry.npmjs.org/inherits/-/inherits-2.0.3.tgz"
   integrity sha512-x00IRNXNy63jwGkJmzPigoySHbaqpNuzKbBOmzK+g2OdZpQ9w+sxCN+VSB3ja7IAge2OP2qpfxTjeNcyjmW1uw==
 
-ioredis@^5.10.1, ioredis@5.10.1:
+ioredis@^5.10.1, ioredis@^5.3.2, ioredis@5.10.1:
   version "5.10.1"
   resolved "https://registry.npmjs.org/ioredis/-/ioredis-5.10.1.tgz"
   integrity sha512-HuEDBTI70aYdx1v6U97SbNx9F1+svQKBDo30o0b9fw055LMepzpOOd0Ccg9Q6tbqmBSJaMuY0fB7yw9/vjBYCA==
@@ -7016,6 +7047,15 @@ json-stable-stringify-without-jsonify@^1.0.1:
   version "1.0.1"
   resolved "https://registry.npmjs.org/json-stable-stringify-without-jsonify/-/json-stable-stringify-without-jsonify-1.0.1.tgz"
   integrity sha512-Bdboy+l7tA3OGW6FjyFHWkP5LuByj1Tk33Ljyq0axyzdk9//JSi2u3fP1QSmd1KNwq6VOKYGlAu87CisVir6Pw==
+
+json2csv@^6.0.0-alpha.2:
+  version "6.0.0-alpha.2"
+  resolved "https://registry.npmjs.org/json2csv/-/json2csv-6.0.0-alpha.2.tgz"
+  integrity sha512-nJ3oP6QxN8z69IT1HmrJdfVxhU1kLTBVgMfRnNZc37YEY+jZ4nU27rBGxT4vaqM/KUCavLRhntmTuBFqZLBUcA==
+  dependencies:
+    "@streamparser/json" "^0.0.6"
+    commander "^6.2.0"
+    lodash.get "^4.4.2"
 
 json5@^2.2.3:
   version "2.2.3"
@@ -9758,7 +9798,7 @@ write-file-atomic@^4.0.2:
     imurmurhash "^0.1.4"
     signal-exit "^3.0.7"
 
-ws@^8, ws@^8.20.0:
+ws@^8, ws@^8.18.0:
   version "8.20.0"
   resolved "https://registry.npmjs.org/ws/-/ws-8.20.0.tgz"
   integrity sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA==
@@ -9802,6 +9842,16 @@ xmlbuilder@~11.0.0:
   version "11.0.1"
   resolved "https://registry.npmjs.org/xmlbuilder/-/xmlbuilder-11.0.1.tgz"
   integrity sha512-fDlsI/kFEx7gLvbecc0/ohLG50fugQp8ryHzMTuW9vSa1GJ0XYWKnhsUx7oie3G98+r56aTQIUB4kht42R3JvA==
+
+xmlbuilder2@^4.0.3:
+  version "4.0.3"
+  resolved "https://registry.npmjs.org/xmlbuilder2/-/xmlbuilder2-4.0.3.tgz"
+  integrity sha512-bx8Q1STctnNaaDymWnkfQLKofs0mGNN7rLLapJlGuV3VlvegD7Ls4ggMjE3aUSWItCCzU0PEv45lI87iSigiCA==
+  dependencies:
+    "@oozcitak/dom" "^2.0.2"
+    "@oozcitak/infra" "^2.0.2"
+    "@oozcitak/util" "^10.0.0"
+    js-yaml "^4.1.1"
 
 xpath@0.0.32:
   version "0.0.32"
@@ -9916,12 +9966,7 @@ zip-stream@^6.0.1:
     compress-commons "^6.0.2"
     readable-stream "^4.0.0"
 
-zod@^3.23.8:
-  version "3.25.76"
-  resolved "https://registry.npmjs.org/zod/-/zod-3.25.76.tgz"
-  integrity sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==
-
-zod@^4.1.12:
+zod@^4.1.12, zod@^4.3.6:
   version "4.3.6"
   resolved "https://registry.npmjs.org/zod/-/zod-4.3.6.tgz"
   integrity sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==
