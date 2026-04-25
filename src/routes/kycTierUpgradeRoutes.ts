@@ -17,6 +17,25 @@ import {
 
 const router = Router();
 
+type BulkKycUpgradeResult = {
+  requestId: string;
+  status: "success" | "failed";
+  message?: string;
+};
+
+const MAX_BULK_IDS = 100;
+
+const normalizeBulkIds = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+
+  const ids = value
+    .filter((id): id is string => typeof id === "string")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+
+  return Array.from(new Set(ids));
+};
+
 // ─── list ─────────────────────────────────────────────────────────────────────
 
 router.get("/", async (req: Request, res: Response) => {
@@ -97,6 +116,116 @@ router.post("/:id/reject", async (req: Request, res: Response) => {
         ? 409
         : 500;
     res.status(status).json({ error: message });
+  }
+});
+
+// POST /api/admin/kyc-upgrades/bulk/approve
+router.post("/bulk/approve", async (req: Request, res: Response) => {
+  try {
+    const reviewedBy: string | undefined =
+      (req as any).jwtUser?.userId ?? (req as any).user?.id;
+
+    if (!reviewedBy) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    const requestIds = normalizeBulkIds(req.body?.requestIds);
+    if (requestIds.length === 0) {
+      return res.status(400).json({
+        error: "requestIds must be a non-empty array of request IDs",
+      });
+    }
+
+    if (requestIds.length > MAX_BULK_IDS) {
+      return res.status(413).json({
+        error: `Too many requestIds supplied (max ${MAX_BULK_IDS})`,
+      });
+    }
+
+    const notes =
+      typeof req.body?.notes === "string" ? req.body.notes.trim() : undefined;
+
+    const results: BulkKycUpgradeResult[] = [];
+
+    for (const requestId of requestIds) {
+      try {
+        await approveKycUpgrade({ requestId, reviewedBy, notes });
+        results.push({ requestId, status: "success" });
+      } catch (err) {
+        results.push({
+          requestId,
+          status: "failed",
+          message: err instanceof Error ? err.message : "Unknown error",
+        });
+      }
+    }
+
+    const succeeded = results.filter((r) => r.status === "success").length;
+    const failed = results.length - succeeded;
+
+    return res.json({
+      message: "Bulk approve completed",
+      summary: { total: results.length, succeeded, failed },
+      results,
+    });
+  } catch (err) {
+    console.error("[kyc-upgrades] bulk approve error:", err);
+    return res.status(500).json({ error: "Failed to bulk approve requests" });
+  }
+});
+
+// POST /api/admin/kyc-upgrades/bulk/reject
+router.post("/bulk/reject", async (req: Request, res: Response) => {
+  try {
+    const reviewedBy: string | undefined =
+      (req as any).jwtUser?.userId ?? (req as any).user?.id;
+
+    if (!reviewedBy) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    const requestIds = normalizeBulkIds(req.body?.requestIds);
+    if (requestIds.length === 0) {
+      return res.status(400).json({
+        error: "requestIds must be a non-empty array of request IDs",
+      });
+    }
+
+    if (requestIds.length > MAX_BULK_IDS) {
+      return res.status(413).json({
+        error: `Too many requestIds supplied (max ${MAX_BULK_IDS})`,
+      });
+    }
+
+    const notes =
+      typeof req.body?.notes === "string" ? req.body.notes.trim() : undefined;
+
+    const results: BulkKycUpgradeResult[] = [];
+
+    for (const requestId of requestIds) {
+      try {
+        await rejectKycUpgrade({ requestId, reviewedBy, notes });
+        results.push({ requestId, status: "success" });
+      } catch (err) {
+        results.push({
+          requestId,
+          status: "failed",
+          message: err instanceof Error ? err.message : "Unknown error",
+        });
+      }
+    }
+
+    const succeeded = results.filter((r) => r.status === "success").length;
+    const failed = results.length - succeeded;
+
+    return res.json({
+      message: "Bulk reject completed",
+      summary: { total: results.length, succeeded, failed },
+      results,
+    });
+  } catch (err) {
+    console.error("[kyc-upgrades] bulk reject error:", err);
+    return res.status(500).json({ error: "Failed to bulk reject requests" });
   }
 });
 
