@@ -1,13 +1,8 @@
+// Initialize centralized configuration first
+import './config/init';
+
 import "./tracer";
 import path from "path";
-import express, { NextFunction, Request, Response } from "express";
-// Serve SEP-1 stellar.toml at /.well-known/stellar.toml
-app.use("/.well-known", express.static(path.join(__dirname, "../public/.well-known")));
-import cors from "cors";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
-import "./tracer";
-
 import express, { NextFunction, Request, Response } from "express";
 import { IncomingMessage, Server } from "http";
 // replaced express-rate-limit with our redis-backed middleware
@@ -16,7 +11,6 @@ import dotenv from "dotenv";
 import spdy from "spdy";
 import https from "https";
 import fs from "fs";
-import path from "path";
 import session from "express-session";
 import * as Sentry from "@sentry/node";
 import { register } from "prom-client";

@@ -1,3 +1,5 @@
+import { getConfigValue } from './appConfig';
+
 export enum MobileMoneyProvider {
   MTN = "mtn",
   AIRTEL = "airtel",
@@ -15,55 +17,36 @@ export interface ProviderLimitsConfig {
   [MobileMoneyProvider.ORANGE]: ProviderLimits;
 }
 
+/**
+ * Get provider limits from centralized configuration.
+ * This replaces hardcoded defaults with values from appConfig.
+ */
+export function getProviderLimitsConfig(): ProviderLimitsConfig {
+  const providers = getConfigValue('providers');
+  return {
+    [MobileMoneyProvider.MTN]: {
+      minAmount: providers.mtn.minAmount,
+      maxAmount: providers.mtn.maxAmount,
+    },
+    [MobileMoneyProvider.AIRTEL]: {
+      minAmount: providers.airtel.minAmount,
+      maxAmount: providers.airtel.maxAmount,
+    },
+    [MobileMoneyProvider.ORANGE]: {
+      minAmount: providers.orange.minAmount,
+      maxAmount: providers.orange.maxAmount,
+    },
+  };
+}
+
 export const DEFAULT_PROVIDER_LIMITS: ProviderLimitsConfig = {
   [MobileMoneyProvider.MTN]: { minAmount: 100, maxAmount: 500000 },
   [MobileMoneyProvider.AIRTEL]: { minAmount: 100, maxAmount: 1000000 },
   [MobileMoneyProvider.ORANGE]: { minAmount: 500, maxAmount: 750000 },
 };
 
-function parseEnvNumber(key: string, defaultValue: number): number {
-  const value = process.env[key];
-  if (!value) return defaultValue;
-  const parsed = parseFloat(value);
-  if (isNaN(parsed) || !isFinite(parsed)) {
-    console.warn(`Invalid value for ${key}, using default: ${defaultValue}`);
-    return defaultValue;
-  }
-  return parsed;
-}
-
-export const PROVIDER_LIMITS: ProviderLimitsConfig = {
-  [MobileMoneyProvider.MTN]: {
-    minAmount: parseEnvNumber(
-      "MTN_MIN_AMOUNT",
-      DEFAULT_PROVIDER_LIMITS[MobileMoneyProvider.MTN].minAmount,
-    ),
-    maxAmount: parseEnvNumber(
-      "MTN_MAX_AMOUNT",
-      DEFAULT_PROVIDER_LIMITS[MobileMoneyProvider.MTN].maxAmount,
-    ),
-  },
-  [MobileMoneyProvider.AIRTEL]: {
-    minAmount: parseEnvNumber(
-      "AIRTEL_MIN_AMOUNT",
-      DEFAULT_PROVIDER_LIMITS[MobileMoneyProvider.AIRTEL].minAmount,
-    ),
-    maxAmount: parseEnvNumber(
-      "AIRTEL_MAX_AMOUNT",
-      DEFAULT_PROVIDER_LIMITS[MobileMoneyProvider.AIRTEL].maxAmount,
-    ),
-  },
-  [MobileMoneyProvider.ORANGE]: {
-    minAmount: parseEnvNumber(
-      "ORANGE_MIN_AMOUNT",
-      DEFAULT_PROVIDER_LIMITS[MobileMoneyProvider.ORANGE].minAmount,
-    ),
-    maxAmount: parseEnvNumber(
-      "ORANGE_MAX_AMOUNT",
-      DEFAULT_PROVIDER_LIMITS[MobileMoneyProvider.ORANGE].maxAmount,
-    ),
-  },
-};
+// PROVIDER_LIMITS is now dynamically loaded from config
+export const PROVIDER_LIMITS: ProviderLimitsConfig = getProviderLimitsConfig();
 
 export function getProviderLimits(
   provider: MobileMoneyProvider,

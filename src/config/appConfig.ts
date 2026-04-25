@@ -1,0 +1,366 @@
+import convict from 'convict';
+import path from 'path';
+import fs from 'fs';
+
+/**
+ * Centralized application configuration using Convict.
+ * This system consolidates all hardcoded limits, provider configs, and app settings
+ * into a single source of truth with environment-based overrides.
+ */
+
+// Define the configuration schema
+export const configSchema = convict({
+  // Environment
+  env: {
+    doc: 'The application environment',
+    format: ['production', 'staging', 'development'],
+    default: 'development',
+    env: 'NODE_ENV',
+  },
+
+  // Database
+  database: {
+    url: {
+      doc: 'PostgreSQL connection URL',
+      format: String,
+      default: 'postgresql://localhost/mobile_money',
+      env: 'DATABASE_URL',
+    },
+  },
+
+  // Redis
+  redis: {
+    url: {
+      doc: 'Redis connection URL',
+      format: String,
+      default: 'redis://localhost:6379',
+      env: 'REDIS_URL',
+    },
+  },
+
+  // Mobile Money Provider Limits
+  providers: {
+    mtn: {
+      minAmount: {
+        doc: 'Minimum transaction amount for MTN (XAF)',
+        format: 'nat',
+        default: 100,
+        env: 'MTN_MIN_AMOUNT',
+      },
+      maxAmount: {
+        doc: 'Maximum transaction amount for MTN (XAF)',
+        format: 'nat',
+        default: 500000,
+        env: 'MTN_MAX_AMOUNT',
+      },
+    },
+    airtel: {
+      minAmount: {
+        doc: 'Minimum transaction amount for Airtel (XAF)',
+        format: 'nat',
+        default: 100,
+        env: 'AIRTEL_MIN_AMOUNT',
+      },
+      maxAmount: {
+        doc: 'Maximum transaction amount for Airtel (XAF)',
+        format: 'nat',
+        default: 1000000,
+        env: 'AIRTEL_MAX_AMOUNT',
+      },
+    },
+    orange: {
+      minAmount: {
+        doc: 'Minimum transaction amount for Orange (XAF)',
+        format: 'nat',
+        default: 500,
+        env: 'ORANGE_MIN_AMOUNT',
+      },
+      maxAmount: {
+        doc: 'Maximum transaction amount for Orange (XAF)',
+        format: 'nat',
+        default: 750000,
+        env: 'ORANGE_MAX_AMOUNT',
+      },
+    },
+  },
+
+  // Transaction Limits by KYC Level
+  transactionLimits: {
+    unverified: {
+      doc: 'Daily transaction limit for unverified users (XAF)',
+      format: 'nat',
+      default: 10000,
+      env: 'LIMIT_UNVERIFIED',
+    },
+    basic: {
+      doc: 'Daily transaction limit for basic KYC users (XAF)',
+      format: 'nat',
+      default: 100000,
+      env: 'LIMIT_BASIC',
+    },
+    full: {
+      doc: 'Daily transaction limit for full KYC users (XAF)',
+      format: 'nat',
+      default: 1000000,
+      env: 'LIMIT_FULL',
+    },
+  },
+
+  // General Transaction Limits
+  transactions: {
+    minAmount: {
+      doc: 'Minimum transaction amount (XAF)',
+      format: 'nat',
+      default: 100,
+      env: 'MIN_TRANSACTION_AMOUNT',
+    },
+    maxAmount: {
+      doc: 'Maximum transaction amount (XAF)',
+      format: 'nat',
+      default: 1000000,
+      env: 'MAX_TRANSACTION_AMOUNT',
+    },
+    maxTags: {
+      doc: 'Maximum number of tags per transaction',
+      format: 'nat',
+      default: 10,
+    },
+    maxMetadataBytes: {
+      doc: 'Maximum size of transaction metadata in bytes',
+      format: 'nat',
+      default: 10240, // 10 KB
+    },
+    maxNotesLength: {
+      doc: 'Maximum length of transaction notes',
+      format: 'nat',
+      default: 256,
+    },
+    timeoutMinutes: {
+      doc: 'Transaction timeout in minutes',
+      format: 'nat',
+      default: 30,
+      env: 'TRANSACTION_TIMEOUT_MINUTES',
+    },
+    idempotencyKeyTtlHours: {
+      doc: 'TTL for idempotency keys in hours',
+      format: 'nat',
+      default: 24,
+      env: 'IDEMPOTENCY_KEY_TTL_HOURS',
+    },
+  },
+
+  // Authentication
+  auth: {
+    maxLoginAttempts: {
+      doc: 'Maximum login attempts before lockout',
+      format: 'nat',
+      default: 5,
+      env: 'MAX_LOGIN_ATTEMPTS',
+    },
+    webauthnChallengeTtlSeconds: {
+      doc: 'WebAuthn challenge TTL in seconds',
+      format: 'nat',
+      default: 300,
+    },
+    adminApiKey: {
+      doc: 'Admin API key for development/testing',
+      format: String,
+      default: 'dev-admin-key',
+      env: 'ADMIN_API_KEY',
+    },
+  },
+
+  // Cache and TTL Settings
+  cache: {
+    geolocationTtlSeconds: {
+      doc: 'Geolocation cache TTL in seconds',
+      format: 'nat',
+      default: 86400, // 24 hours
+    },
+    geolocationApiTimeoutMs: {
+      doc: 'Geolocation API timeout in milliseconds',
+      format: 'nat',
+      default: 3000,
+    },
+    healthCheckCacheTtlSeconds: {
+      doc: 'Health check cache TTL in seconds',
+      format: 'nat',
+      default: 300, // 5 minutes
+    },
+    volumeCacheTtlSeconds: {
+      doc: 'Volume cache TTL in seconds',
+      format: 'nat',
+      default: 300, // 5 minutes
+    },
+    feeStrategyTtlSeconds: {
+      doc: 'Fee strategy cache TTL in seconds',
+      format: 'nat',
+      default: 60,
+    },
+    loadBalancerHealthCacheTtlMs: {
+      doc: 'Load balancer health check cache TTL in milliseconds',
+      format: 'nat',
+      default: 5000,
+    },
+    acceptLanguageCacheLimit: {
+      doc: 'Accept-Language header cache limit',
+      format: 'nat',
+      default: 250,
+    },
+    slowQueryThresholdMs: {
+      doc: 'Slow query logging threshold in milliseconds',
+      format: 'nat',
+      default: 1000,
+      env: 'SLOW_QUERY_THRESHOLD_MS',
+    },
+  },
+
+  // Mobile Money Provider Health Checks
+  healthCheck: {
+    failureThreshold: {
+      doc: 'Number of failures before opening circuit breaker',
+      format: 'nat',
+      default: 3,
+    },
+    openDurationMs: {
+      doc: 'Duration to keep circuit breaker open in milliseconds',
+      format: 'nat',
+      default: 60000, // 1 minute
+    },
+  },
+
+  // Orange Provider Settings
+  orange: {
+    defaultSessionTtlMs: {
+      doc: 'Orange session TTL in milliseconds',
+      format: 'nat',
+      default: 1200000, // 20 minutes
+    },
+    defaultRefreshSkewMs: {
+      doc: 'Orange refresh token skew in milliseconds',
+      format: 'nat',
+      default: 60000, // 1 minute
+    },
+  },
+
+  // SEP-38 (Rate Provider)
+  sep38: {
+    pricePrecision: {
+      doc: 'Price precision for SEP-38 rates',
+      format: 'nat',
+      default: 7,
+    },
+    xlmUsdFallback: {
+      doc: 'Fallback XLM/USD rate',
+      format: Number,
+      default: 0.12,
+    },
+  },
+
+  // File Upload
+  fileUpload: {
+    maxDisputeFileSize: {
+      doc: 'Maximum dispute file size in bytes',
+      format: 'nat',
+      default: 10485760, // 10 MB
+    },
+  },
+
+  // Liquidity Management
+  liquidity: {
+    transferTargetRatio: {
+      doc: 'Target ratio for liquidity rebalancing',
+      format: Number,
+      default: 0.5, // 50%
+    },
+  },
+
+  // Encryption
+  encryption: {
+    ivLength: {
+      doc: 'IV length for AES-GCM encryption in bytes',
+      format: 'nat',
+      default: 12, // 96-bit
+    },
+    authTagLength: {
+      doc: 'Auth tag length for AES-GCM encryption in bytes',
+      format: 'nat',
+      default: 16, // 128-bit
+    },
+  },
+
+  // Stellar
+  stellar: {
+    stroopsPerXlm: {
+      doc: 'Number of stroops per XLM',
+      format: 'nat',
+      default: 10000000,
+    },
+  },
+
+  // Mobile Money Rate Limiting
+  mobileMoney: {
+    rateLimitWindowMs: {
+      doc: 'Rate limiting window in milliseconds',
+      format: 'nat',
+      default: 3600000, // 1 hour
+    },
+    rateLimitThreshold: {
+      doc: 'Rate limiting threshold (number of requests)',
+      format: 'nat',
+      default: 3,
+    },
+  },
+
+  // Slow Query Logging
+  logging: {
+    enableSlowQueryLogging: {
+      doc: 'Enable slow query logging',
+      format: Boolean,
+      default: false,
+      env: 'ENABLE_SLOW_QUERY_LOGGING',
+    },
+  },
+});
+
+/**
+ * Load configuration from files if they exist
+ */
+export function loadConfigFiles(env: string): void {
+  const configDir = path.join(__dirname, 'configurations');
+  
+  // Load environment-specific config
+  const envConfigPath = path.join(configDir, `${env}.json`);
+  if (fs.existsSync(envConfigPath)) {
+    configSchema.loadFile(envConfigPath);
+  }
+
+  // Load local overrides if they exist (for development)
+  const localConfigPath = path.join(configDir, 'local.json');
+  if (fs.existsSync(localConfigPath)) {
+    configSchema.loadFile(localConfigPath);
+  }
+}
+
+/**
+ * Validate the configuration
+ */
+export function validateConfig(): void {
+  configSchema.validate({ allowed: 'strict' });
+}
+
+/**
+ * Get the configuration
+ */
+export function getConfig() {
+  return configSchema.getProperties();
+}
+
+/**
+ * Get a specific configuration value
+ */
+export function getConfigValue(key: string): any {
+  return configSchema.get(key);
+}
+
+export default configSchema;

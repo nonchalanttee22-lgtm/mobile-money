@@ -1,3 +1,5 @@
+import { getConfigValue } from './appConfig';
+
 export enum KYCLevel {
   Unverified = 'unverified',
   Basic = 'basic',
@@ -10,15 +12,23 @@ export interface LimitConfig {
   [KYCLevel.Full]: number;
 }
 
-export const TRANSACTION_LIMITS: LimitConfig = {
-  [KYCLevel.Unverified]: parseFloat(process.env.LIMIT_UNVERIFIED || '10000'),
-  [KYCLevel.Basic]: parseFloat(process.env.LIMIT_BASIC || '100000'),
-  [KYCLevel.Full]: parseFloat(process.env.LIMIT_FULL || '1000000')
-};
+/**
+ * Get transaction limits by KYC level from centralized configuration.
+ */
+export function getTransactionLimitsConfig(): LimitConfig {
+  const limits = getConfigValue('transactionLimits');
+  return {
+    [KYCLevel.Unverified]: limits.unverified,
+    [KYCLevel.Basic]: limits.basic,
+    [KYCLevel.Full]: limits.full,
+  };
+}
 
-// Per-transaction amount limits
-export const MIN_TRANSACTION_AMOUNT = parseFloat(process.env.MIN_TRANSACTION_AMOUNT || '100');
-export const MAX_TRANSACTION_AMOUNT = parseFloat(process.env.MAX_TRANSACTION_AMOUNT || '1000000');
+export const TRANSACTION_LIMITS: LimitConfig = getTransactionLimitsConfig();
+
+// Per-transaction amount limits from config
+export const MIN_TRANSACTION_AMOUNT = getConfigValue('transactions.minAmount');
+export const MAX_TRANSACTION_AMOUNT = getConfigValue('transactions.maxAmount');
 
 // Validation on module load
 function validateLimits(limits: LimitConfig): void {

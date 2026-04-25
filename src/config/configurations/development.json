@@ -1,0 +1,12 @@
+{
+  "env": "development",
+  "database": {
+    "url": "postgresql://localhost/mobile_money_dev"
+  },
+  "redis": {
+    "url": "redis://localhost:6379"
+  },
+  "auth": {
+    "enableSlowQueryLogging": true
+  }
+}
