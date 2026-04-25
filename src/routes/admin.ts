@@ -18,6 +18,7 @@ import { redisClient } from "../config/redis";
 import { checkReplicaHealth, pool} from "../config/database";
 import { UserModel } from "../models/users";
 import { TransactionModel } from "../models/transaction";
+import { TransactionStatus } from "../models/transaction";
 import multer from "multer";
 import {
   parseCSV,
@@ -72,6 +73,31 @@ interface Transaction {
 interface AuthRequest extends Request {
   user?: User;
 }
+
+type BulkActionResult = {
+  userId: string;
+  status: "success" | "failed";
+  message?: string;
+};
+
+type BulkTransactionActionResult = {
+  transactionId: string;
+  status: "success" | "failed";
+  message?: string;
+};
+
+const normalizeBulkIds = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+
+  const ids = value
+    .filter((id): id is string => typeof id === "string")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+
+  return Array.from(new Set(ids));
+};
+
+const MAX_BULK_IDS = 100;
 
 /**
  * Mock services (replace with real DB/services)
@@ -206,6 +232,212 @@ router.get(
         message: "Failed to retrieve transaction resolution metrics",
         error: err instanceof Error ? err.message : "Unknown error",
       });
+    }
+  },
+);
+
+// POST /api/admin/users/bulk/freeze
+router.post(
+  "/users/bulk/freeze",
+  requireAdmin,
+  logAdminAction("BULK_FREEZE_USERS"),
+  async (req: Request, res: Response) => {
+    try {
+      const adminUser = (req as AuthRequest).user;
+      if (!adminUser) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const { reason } = req.body;
+      if (!reason || typeof reason !== "string" || reason.trim().length === 0) {
+        return res.status(400).json({
+          message: "A reason is required for freezing an account",
+        });
+      }
+
+      const userIds = normalizeBulkIds(req.body?.userIds);
+      if (userIds.length === 0) {
+        return res.status(400).json({
+          message: "userIds must be a non-empty array of user IDs",
+        });
+      }
+
+      if (userIds.length > MAX_BULK_IDS) {
+        return res.status(413).json({
+          message: `Too many userIds supplied (max ${MAX_BULK_IDS})`,
+        });
+      }
+
+      const userModel = new UserModel();
+      const results: BulkActionResult[] = [];
+
+      for (const userId of userIds) {
+        try {
+          const user = await userModel.findById(userId);
+          if (!user) {
+            results.push({
+              userId,
+              status: "failed",
+              message: "User not found",
+            });
+            continue;
+          }
+
+          if (user.status === "frozen") {
+            results.push({
+              userId,
+              status: "failed",
+              message: "User account is already frozen",
+            });
+            continue;
+          }
+
+          const updatedUser = await userModel.updateStatus(
+            userId,
+            "frozen",
+            adminUser.id,
+            reason.trim(),
+            req.ip,
+            req.get("user-agent"),
+          );
+
+          if (!updatedUser) {
+            results.push({
+              userId,
+              status: "failed",
+              message: "Failed to freeze user account",
+            });
+            continue;
+          }
+
+          results.push({ userId, status: "success" });
+        } catch (error) {
+          results.push({
+            userId,
+            status: "failed",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
+
+      const succeeded = results.filter((r) => r.status === "success").length;
+      const failed = results.length - succeeded;
+
+      return res.json({
+        message: "Bulk freeze completed",
+        summary: {
+          total: results.length,
+          succeeded,
+          failed,
+        },
+        results,
+      });
+    } catch (error) {
+      console.error("Error bulk freezing users:", error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  },
+);
+
+// POST /api/admin/users/bulk/unfreeze
+router.post(
+  "/users/bulk/unfreeze",
+  requireAdmin,
+  logAdminAction("BULK_UNFREEZE_USERS"),
+  async (req: Request, res: Response) => {
+    try {
+      const adminUser = (req as AuthRequest).user;
+      if (!adminUser) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const { reason } = req.body;
+      if (!reason || typeof reason !== "string" || reason.trim().length === 0) {
+        return res.status(400).json({
+          message: "A reason is required for unfreezing an account",
+        });
+      }
+
+      const userIds = normalizeBulkIds(req.body?.userIds);
+      if (userIds.length === 0) {
+        return res.status(400).json({
+          message: "userIds must be a non-empty array of user IDs",
+        });
+      }
+
+      if (userIds.length > MAX_BULK_IDS) {
+        return res.status(413).json({
+          message: `Too many userIds supplied (max ${MAX_BULK_IDS})`,
+        });
+      }
+
+      const userModel = new UserModel();
+      const results: BulkActionResult[] = [];
+
+      for (const userId of userIds) {
+        try {
+          const user = await userModel.findById(userId);
+          if (!user) {
+            results.push({
+              userId,
+              status: "failed",
+              message: "User not found",
+            });
+            continue;
+          }
+
+          if (user.status !== "frozen") {
+            results.push({
+              userId,
+              status: "failed",
+              message: "User account is not frozen",
+            });
+            continue;
+          }
+
+          const updatedUser = await userModel.updateStatus(
+            userId,
+            "active",
+            adminUser.id,
+            reason.trim(),
+            req.ip,
+            req.get("user-agent"),
+          );
+
+          if (!updatedUser) {
+            results.push({
+              userId,
+              status: "failed",
+              message: "Failed to unfreeze user account",
+            });
+            continue;
+          }
+
+          results.push({ userId, status: "success" });
+        } catch (error) {
+          results.push({
+            userId,
+            status: "failed",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
+
+      const succeeded = results.filter((r) => r.status === "success").length;
+      const failed = results.length - succeeded;
+
+      return res.json({
+        message: "Bulk unfreeze completed",
+        summary: {
+          total: results.length,
+          succeeded,
+          failed,
+        },
+        results,
+      });
+    } catch (error) {
+      console.error("Error bulk unfreezing users:", error);
+      return res.status(500).json({ message: "Internal server error" });
     }
   },
 );
@@ -367,7 +599,74 @@ router.post(
   },
 );
 
-export default router;
+// POST /api/admin/users/bulk/unlock
+router.post(
+  "/users/bulk/unlock",
+  requireAdmin,
+  logAdminAction("BULK_UNLOCK_USERS"),
+  async (req: Request, res: Response) => {
+    try {
+      const adminUser = (req as AuthRequest).user;
+      if (!adminUser) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const userIds = normalizeBulkIds(req.body?.userIds);
+      if (userIds.length === 0) {
+        return res.status(400).json({
+          message: "userIds must be a non-empty array of user IDs",
+        });
+      }
+
+      if (userIds.length > MAX_BULK_IDS) {
+        return res.status(413).json({
+          message: `Too many userIds supplied (max ${MAX_BULK_IDS})`,
+        });
+      }
+
+      const results: BulkActionResult[] = [];
+
+      for (const userId of userIds) {
+        try {
+          const user = users.find((u) => u.id === userId);
+          if (!user) {
+            results.push({
+              userId,
+              status: "failed",
+              message: "User not found",
+            });
+            continue;
+          }
+
+          user.locked = false;
+          results.push({ userId, status: "success" });
+        } catch (error) {
+          results.push({
+            userId,
+            status: "failed",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
+
+      const succeeded = results.filter((r) => r.status === "success").length;
+      const failed = results.length - succeeded;
+
+      return res.json({
+        message: "Bulk unlock completed",
+        summary: {
+          total: results.length,
+          succeeded,
+          failed,
+        },
+        results,
+      });
+    } catch (error) {
+      console.error("Error bulk unlocking users:", error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  },
+);
 
 // PUT /api/admin/users/:id
 router.put(
@@ -746,6 +1045,249 @@ router.post(
   requireAdmin,
   logAdminAction("REFUND_TRANSACTION"),
   refundTransactionHandler,
+);
+
+// PATCH /api/admin/transactions/bulk/notes
+router.patch(
+  "/transactions/bulk/notes",
+  requireAdmin,
+  logAdminAction("BULK_UPDATE_TRANSACTION_ADMIN_NOTES"),
+  async (req: Request, res: Response) => {
+    try {
+      const adminUser = (req as AuthRequest).user;
+      if (!adminUser) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const { admin_notes: adminNotes } = req.body;
+      if (typeof adminNotes !== "string") {
+        return res.status(400).json({ message: "admin_notes must be a string" });
+      }
+
+      const transactionIds = normalizeBulkIds(req.body?.transactionIds);
+      if (transactionIds.length === 0) {
+        return res.status(400).json({
+          message: "transactionIds must be a non-empty array of transaction IDs",
+        });
+      }
+
+      if (transactionIds.length > MAX_BULK_IDS) {
+        return res.status(413).json({
+          message: `Too many transactionIds supplied (max ${MAX_BULK_IDS})`,
+        });
+      }
+
+      const results: BulkTransactionActionResult[] = [];
+
+      for (const transactionId of transactionIds) {
+        try {
+          const tx = await transactionModel.findById(transactionId);
+          if (!tx) {
+            results.push({
+              transactionId,
+              status: "failed",
+              message: "Transaction not found",
+            });
+            continue;
+          }
+
+          await transactionModel.updateAdminNotes(transactionId, adminNotes);
+          results.push({ transactionId, status: "success" });
+        } catch (error) {
+          results.push({
+            transactionId,
+            status: "failed",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
+
+      const succeeded = results.filter((r) => r.status === "success").length;
+      const failed = results.length - succeeded;
+
+      return res.json({
+        message: "Bulk admin notes update completed",
+        summary: { total: results.length, succeeded, failed },
+        results,
+      });
+    } catch (error) {
+      console.error("Error bulk updating transaction admin notes:", error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  },
+);
+
+// PATCH /api/admin/transactions/bulk/status
+router.patch(
+  "/transactions/bulk/status",
+  requireAdmin,
+  logAdminAction("BULK_UPDATE_TRANSACTION_STATUS"),
+  async (req: Request, res: Response) => {
+    try {
+      const adminUser = (req as AuthRequest).user;
+      if (!adminUser) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const { status } = req.body;
+      const allowed = Object.values(TransactionStatus) as string[];
+      if (typeof status !== "string" || !allowed.includes(status)) {
+        return res.status(400).json({
+          message: `status must be one of: ${allowed.join(", ")}`,
+        });
+      }
+
+      const transactionIds = normalizeBulkIds(req.body?.transactionIds);
+      if (transactionIds.length === 0) {
+        return res.status(400).json({
+          message: "transactionIds must be a non-empty array of transaction IDs",
+        });
+      }
+
+      if (transactionIds.length > MAX_BULK_IDS) {
+        return res.status(413).json({
+          message: `Too many transactionIds supplied (max ${MAX_BULK_IDS})`,
+        });
+      }
+
+      const results: BulkTransactionActionResult[] = [];
+
+      for (const transactionId of transactionIds) {
+        try {
+          const tx = await transactionModel.findById(transactionId);
+          if (!tx) {
+            results.push({
+              transactionId,
+              status: "failed",
+              message: "Transaction not found",
+            });
+            continue;
+          }
+
+          await transactionModel.updateStatus(transactionId, status as TransactionStatus);
+          results.push({ transactionId, status: "success" });
+        } catch (error) {
+          results.push({
+            transactionId,
+            status: "failed",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
+
+      const succeeded = results.filter((r) => r.status === "success").length;
+      const failed = results.length - succeeded;
+
+      return res.json({
+        message: "Bulk status update completed",
+        summary: { total: results.length, succeeded, failed },
+        results,
+      });
+    } catch (error) {
+      console.error("Error bulk updating transaction status:", error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  },
+);
+
+// POST /api/admin/transactions/bulk/refund
+router.post(
+  "/transactions/bulk/refund",
+  requireAdmin,
+  logAdminAction("BULK_REFUND_TRANSACTIONS"),
+  async (req: Request, res: Response) => {
+    try {
+      const adminUser = (req as AuthRequest).user;
+      if (!adminUser) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const transactionIds = normalizeBulkIds(req.body?.transactionIds);
+      if (transactionIds.length === 0) {
+        return res.status(400).json({
+          message: "transactionIds must be a non-empty array of transaction IDs",
+        });
+      }
+
+      if (transactionIds.length > MAX_BULK_IDS) {
+        return res.status(413).json({
+          message: `Too many transactionIds supplied (max ${MAX_BULK_IDS})`,
+        });
+      }
+
+      const { calculateFee } = await import("../utils/fees");
+      const results: BulkTransactionActionResult[] = [];
+
+      for (const transactionId of transactionIds) {
+        try {
+          const transaction = await transactionModel.findById(transactionId);
+          if (!transaction) {
+            results.push({
+              transactionId,
+              status: "failed",
+              message: "Transaction not found",
+            });
+            continue;
+          }
+
+          if (transaction.type !== "withdraw") {
+            results.push({
+              transactionId,
+              status: "failed",
+              message: "Only withdrawal transactions can be refunded",
+            });
+            continue;
+          }
+
+          if (transaction.status !== TransactionStatus.Failed) {
+            results.push({
+              transactionId,
+              status: "failed",
+              message: `Cannot refund transaction with status '${transaction.status}'. Only failed transactions are eligible.`,
+            });
+            continue;
+          }
+
+          const amount = parseFloat(transaction.amount);
+          const { fee } = await calculateFee(amount);
+          const refundAmount = parseFloat((amount - fee).toFixed(2));
+          if (refundAmount <= 0) {
+            results.push({
+              transactionId,
+              status: "failed",
+              message: "Refund amount after fees is zero or negative",
+            });
+            continue;
+          }
+
+          await transactionModel.updateStatus(
+            transactionId,
+            TransactionStatus.Completed,
+          );
+
+          results.push({ transactionId, status: "success" });
+        } catch (error) {
+          results.push({
+            transactionId,
+            status: "failed",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
+
+      const succeeded = results.filter((r) => r.status === "success").length;
+      const failed = results.length - succeeded;
+
+      return res.json({
+        message: "Bulk refund completed",
+        summary: { total: results.length, succeeded, failed },
+        results,
+      });
+    } catch (error) {
+      console.error("Error bulk refunding transactions:", error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  },
 );
 
 /**
