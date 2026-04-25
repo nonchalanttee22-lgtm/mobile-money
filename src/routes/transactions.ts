@@ -22,8 +22,10 @@ import { geolocateMiddleware } from "../middleware/geolocate";
 import { TransactionModel } from "../models/transaction";
 import { generateTransactionPdfBuffer } from "../services/pdfReceipt";
 import { generateShareToken, verifyShareToken } from "../utils/share";
+import { createExportRoutes } from "./export";
 
 export const transactionRoutes = Router();
+transactionRoutes.use(createExportRoutes());
 
 const transactionModel = new TransactionModel();
 

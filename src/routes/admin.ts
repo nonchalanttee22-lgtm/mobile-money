@@ -646,6 +646,17 @@ router.put(
   },
 );
 
+// provider balance route
+router.get("/providers/balances", requireAdmin, async (req, res) => {
+  const mobileMoneyService = new MobileMoneyService();
+  const balances = await mobileMoneyService.getAllProviderBalances();
+
+  return res.json({
+    success: true,
+    data: balances,
+  });
+});
+
 /**
  * =========================
  * TRANSACTIONS

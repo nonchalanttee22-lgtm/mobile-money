@@ -66,6 +66,39 @@ describe("GET /api/transactions/export", () => {
     expect(release).toHaveBeenCalled();
   });
 
+  it("streams JSON array when format=json", async () => {
+    const release = jest.fn();
+    const rows = [
+      { id: "1", reference_number: "REF1" },
+      { id: "2", reference_number: "REF2" },
+    ];
+    const rowStream = Readable.from(rows);
+
+    const connect = jest.fn().mockResolvedValue({
+      query: jest.fn().mockReturnValue(rowStream),
+      release,
+    });
+
+    const app = express();
+    app.use("/api/transactions", createExportRoutes({
+      db: { connect },
+      createQueryStream: (text, values) => ({ text, values }),
+    }));
+
+    const response = await request(app)
+      .get("/api/transactions/export")
+      .query({ format: "json" })
+      .set("X-API-Key", adminKey);
+
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toMatch(/application\/json/);
+    const parsed = JSON.parse(response.text);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].id).toBe("1");
+    expect(parsed[1].id).toBe("2");
+    expect(release).toHaveBeenCalled();
+  });
+
   it("returns 401 without admin auth", async () => {
     const app = express();
     app.use("/api/transactions", createExportRoutes({

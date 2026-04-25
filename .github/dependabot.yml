@@ -4,11 +4,9 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "06:00"
       timezone: "Africa/Lagos"
-    target-branch: "main"
     open-pull-requests-limit: 10
     reviewers:
       - "RemmyAcee"
@@ -22,6 +20,10 @@ updates:
       prefix: "deps"
       include: "scope"
     groups:
+      security-npm:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
       npm-production:
         dependency-type: "production"
         update-types:
@@ -38,6 +40,40 @@ updates:
         patterns:
           - "*"
 
+  - package-ecosystem: "npm"
+    directory: "/bridge-starter-node"
+    schedule:
+      interval: "daily"
+      time: "06:05"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "RemmyAcee"
+    assignees:
+      - "RemmyAcee"
+    labels:
+      - "dependencies"
+      - "npm"
+      - "bridge-starter-node"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      security-bridge-npm:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
+      bridge-npm-production:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      bridge-npm-development:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+
   - package-ecosystem: "cargo"
     directory: "/contracts"
     schedule:
@@ -45,7 +81,6 @@ updates:
       day: "monday"
       time: "06:15"
       timezone: "Africa/Lagos"
-    target-branch: "main"
     open-pull-requests-limit: 5
     reviewers:
       - "RemmyAcee"
@@ -59,6 +94,10 @@ updates:
       prefix: "deps"
       include: "scope"
     groups:
+      security-cargo:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
       cargo-dependencies:
         update-types:
           - "minor"
@@ -76,7 +115,6 @@ updates:
       day: "monday"
       time: "06:30"
       timezone: "Africa/Lagos"
-    target-branch: "main"
     open-pull-requests-limit: 5
     reviewers:
       - "RemmyAcee"
@@ -90,6 +128,10 @@ updates:
       prefix: "ci"
       include: "scope"
     groups:
+      security-github-actions:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
       github-actions:
         patterns:
           - "*"

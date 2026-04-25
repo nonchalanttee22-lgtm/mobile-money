@@ -19,8 +19,10 @@ import { validateTransactionFilters } from "../../utils/transactionFilters";
 import { requireAuth } from "../../middleware/auth";
 import { checkAccountStatusStrict } from "../../middleware/checkAccountStatus";
 import { geolocateMiddleware } from "../../middleware/geolocate";
+import { createExportRoutes } from "../export";
 
 export const transactionRoutesV1 = Router();
+transactionRoutesV1.use(createExportRoutes());
 
 // Deposit transaction route
 transactionRoutesV1.post(
@@ -31,7 +33,7 @@ transactionRoutesV1.post(
   haltOnTimedout,
   setApiVersion("v1"),
   geolocateMiddleware,
-  depositHandler
+  depositHandler,
 );
 
 // Withdraw transaction route
@@ -43,7 +45,7 @@ transactionRoutesV1.post(
   haltOnTimedout,
   setApiVersion("v1"),
   geolocateMiddleware,
-  withdrawHandler
+  withdrawHandler,
 );
 
 // List transactions with status filtering and pagination
@@ -66,7 +68,7 @@ transactionRoutesV1.get(
     req.apiVersion = "v1";
     next();
   },
-  listAmlAlertsHandler
+  listAmlAlertsHandler,
 );
 
 transactionRoutesV1.patch(
@@ -78,7 +80,7 @@ transactionRoutesV1.patch(
     req.apiVersion = "v1";
     next();
   },
-  reviewAmlAlertHandler
+  reviewAmlAlertHandler,
 );
 
 // Get specific transaction
@@ -87,7 +89,7 @@ transactionRoutesV1.get(
   TimeoutPresets.quick,
   haltOnTimedout,
   setApiVersion("v1"),
-  getTransactionHandler
+  getTransactionHandler,
 );
 
 // Update transaction notes
@@ -96,7 +98,7 @@ transactionRoutesV1.patch(
   TimeoutPresets.quick,
   haltOnTimedout,
   setApiVersion("v1"),
-  updateNotesHandler
+  updateNotesHandler,
 );
 
 // Search transactions
@@ -105,7 +107,7 @@ transactionRoutesV1.get(
   TimeoutPresets.quick,
   haltOnTimedout,
   setApiVersion("v1"),
-  searchTransactionsHandler
+  searchTransactionsHandler,
 );
 
 // Replace metadata

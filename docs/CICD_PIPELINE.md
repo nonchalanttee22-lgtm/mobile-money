@@ -6,10 +6,11 @@ This document provides comprehensive documentation for the GitHub Actions CI/CD 
 
 ## Pipeline Architecture
 
-The CI/CD system consists of two primary workflows:
+The CI/CD system consists of three primary workflows:
 
 1. **CI Workflow** (`.github/workflows/ci.yml`) - Runs on all branches
-2. **CD Workflow** (`.github/workflows/deploy.yml`) - Runs on main branch only after successful CI
+2. **Dependabot Auto Merge Workflow** (`.github/workflows/dependabot-auto-merge.yml`) - Auto-approves and auto-merges safe dependency remediation PRs after checks pass
+3. **CD Workflow** (`.github/workflows/deploy.yml`) - Runs on main branch only after successful CI
 
 ### Workflow Execution Flow
 
@@ -21,7 +22,22 @@ Code Push → CI Workflow → [Test + Lint + Build + Docker] → CD Workflow →
 
 The CI workflow (`.github/workflows/ci.yml`) executes the following jobs:
 
-### 1. Test Job
+### 1. Security Job
+
+**Purpose**: Block pull requests and protected branch pushes when high or critical dependency vulnerabilities are detected.
+
+**Steps**:
+
+- Checkout code from repository
+- Setup Node.js 20 with npm caching for both lockfiles
+- Install the Snyk CLI
+- Verify the `SNYK_TOKEN` secret is configured
+- Run `npm audit --audit-level=high` and `snyk test --severity-threshold=high` for the repository root package
+- Run the same `npm audit` and `snyk test` checks for `bridge-starter-node/`
+
+**Failure Behavior**: Any High or Critical finding fails the workflow and blocks downstream jobs.
+
+### 2. Test Job
 
 **Purpose**: Execute automated tests with coverage reporting
 
@@ -47,7 +63,7 @@ The CI workflow (`.github/workflows/ci.yml`) executes the following jobs:
 
 **Failure Behavior**: If tests fail, the entire pipeline stops and subsequent jobs are blocked.
 
-### 2. Build Job
+### 3. Build Job
 
 **Purpose**: Compile TypeScript code and verify build artifacts
 
@@ -63,7 +79,7 @@ The CI workflow (`.github/workflows/ci.yml`) executes the following jobs:
 
 **Failure Behavior**: If build fails, Docker image creation is blocked.
 
-### 3. Docker Job
+### 4. Docker Job
 
 **Purpose**: Build Docker images and push to container registry
 
@@ -214,6 +230,7 @@ The following secrets must be configured in your repository settings:
 | `CODECOV_TOKEN`     | Codecov upload token for coverage reporting | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` |
 | `REGISTRY_USERNAME` | Container registry username                 | `myusername`                           |
 | `REGISTRY_PASSWORD` | Container registry password/token           | `ghp_abc123...`                        |
+| `SNYK_TOKEN`        | Snyk API token for dependency scanning      | `12345678-90ab-cdef-1234-567890abcdef` |
 
 ### CD Workflow Secrets
 
@@ -246,6 +263,37 @@ REDIS_URL: redis://localhost:6379
 NODE_ENV: test
 ```
 
+### Security Environment
+
+- `SNYK_TOKEN` - Required for `snyk test` in CI
+- `package-lock.json` - Required in both `/` and `/bridge-starter-node` so `npm audit` and Snyk scan a reproducible dependency graph
+
+## Dependency Security Automation
+
+### Pull Request Security Gate
+
+The CI workflow includes a dedicated `security` job that runs before tests. Add this job as a required branch protection check so High and Critical vulnerability findings block merges to protected branches.
+
+### Dependabot Auto-Patching
+
+The repository uses Dependabot for:
+
+- Daily npm update checks at the repository root
+- Daily npm update checks for `bridge-starter-node/`
+- Weekly Cargo updates for `contracts/`
+- Weekly GitHub Actions updates
+
+Grouped security-update rules are defined in `.github/dependabot.yml`, and `.github/workflows/dependabot-auto-merge.yml` auto-approves and enables automerge for safe patch/minor and grouped security PRs after required checks pass.
+
+### Required Repository Settings
+
+These settings must be enabled in GitHub because they cannot be fully enforced from repository files alone:
+
+1. Enable **Dependabot alerts** and **Dependabot security updates** in repository security settings.
+2. Enable **Auto-merge** for pull requests in repository settings.
+3. Add the CI `security` job as a **required status check** in the branch protection rule for `main` and any other protected branches.
+4. Store the `SNYK_TOKEN` secret under **Settings ƒ+' Secrets and variables ƒ+' Actions**.
+
 ### Staging Environment (Deploy Job)
 
 These are loaded from GitHub secrets and passed to the deployment:
@@ -265,6 +313,8 @@ These are loaded from GitHub secrets and passed to the deployment:
 #### 1. Test Failures
 
 # Example snippet for your .github/workflows/ci.yml
+
+```yaml
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -280,13 +330,17 @@ jobs:
         credentials:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
+```
+
 **Symptom**: `Error response from daemon: unauthorized: incorrect username or password` OR `toomanyrequests` during Service Container startup.
 
 **Possible Causes**:
+
 - The `REGISTRY_USERNAME` or `REGISTRY_PASSWORD` secrets are incorrect or expired.
 - Docker Hub rate limits reached on GitHub's shared IP.
 
 **Solutions**:
+
 - Update `REGISTRY_PASSWORD` with a fresh **Docker Hub Personal Access Token (PAT)**.
 - Ensure `REGISTRY_USERNAME` matches your Docker Hub handle exactly.
 

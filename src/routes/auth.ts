@@ -11,6 +11,8 @@ import { verifyTOTPToken, verifyBackupCode, is2FAEnabled } from '../auth/2fa';
 import { evaluateAdminLoginAnomaly } from '../services/loginAnomaly';
 import { validateRequest } from '../middleware/validation';
 import { hashPassword } from '../utils/password';
+import { redisClient } from '../config/redis';
+import { TransactionModel } from '../models/transaction';
 
 export const authRoutes = Router();
 
@@ -300,12 +302,50 @@ authRoutes.get('/me', authenticateToken, async (req: Request, res: Response) => 
   try {
     const permissions = await getUserPermissions(payload.userId);
 
+    const cacheKey = `user:balance:stats:${payload.userId}`;
+    let balanceStats = { total_deposited: "0", total_withdrawn: "0", current_balance: "0" };
+
+    if (redisClient.isOpen) {
+      const cachedStats = await redisClient.get(cacheKey);
+      if (cachedStats) {
+        try {
+          balanceStats = JSON.parse(cachedStats);
+        } catch (e) {
+          console.error("Error parsing cached balance stats", e);
+        }
+      } else {
+        const transactionModel = new TransactionModel();
+        const dbStats = await transactionModel.getBalanceStatistics(payload.userId);
+        if (dbStats) {
+          balanceStats = {
+            total_deposited: dbStats.total_deposited || "0",
+            total_withdrawn: dbStats.total_withdrawn || "0",
+            current_balance: dbStats.current_balance || "0",
+          };
+          await redisClient.set(cacheKey, JSON.stringify(balanceStats), { EX: 3600 });
+        }
+      }
+    } else {
+      const transactionModel = new TransactionModel();
+      const dbStats = await transactionModel.getBalanceStatistics(payload.userId);
+      if (dbStats) {
+        balanceStats = {
+          total_deposited: dbStats.total_deposited || "0",
+          total_withdrawn: dbStats.total_withdrawn || "0",
+          current_balance: dbStats.current_balance || "0",
+        };
+      }
+    }
+
     res.json({
       user: {
         userId: payload.userId,
         email: payload.email,
         role: payload.role,
         permissions,
+        total_deposited: balanceStats.total_deposited,
+        total_withdrawn: balanceStats.total_withdrawn,
+        current_balance: balanceStats.current_balance,
       },
       tokenInfo: {
         issuedAt: payload.iat,

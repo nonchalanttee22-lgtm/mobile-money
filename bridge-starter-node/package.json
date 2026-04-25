@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  
   "scripts": {
+    "audit:high": "npm audit --audit-level=high",
+    "snyk:test:high": "snyk test --severity-threshold=high",
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
     "build": "tsc",
     "start": "node dist/app.js"

@@ -3,7 +3,7 @@ import {
   Strategy as SamlStrategy,
   VerifiedCallback,
   Profile as SamlProfile,
-} from "passport-saml";
+} from "@node-saml/passport-saml";
 import { Request, Response, NextFunction, Router } from "express";
 import { pool } from "../config/database";
 import { generateToken, generateRefreshToken } from "./jwt";
@@ -117,7 +117,7 @@ export class SSOService {
   private async loadAndConfigureStrategies(): Promise<void> {
     try {
       const result = await pool.query(
-        "SELECT * FROM sso_providers WHERE is_active = true"
+        "SELECT * FROM sso_providers WHERE is_active = true",
       );
 
       for (const provider of result.rows) {
@@ -144,34 +144,43 @@ export class SSOService {
       wantAssertionsSigned: true,
       signatureAlgorithm: "sha256",
       digestAlgorithm: "sha256",
-      identifierFormat: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+      identifierFormat:
+        "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+    };
+
+    const verifySamlProfile = async (
+      profile: SamlProfile | null | undefined,
+      done: VerifiedCallback,
+    ) => {
+      try {
+        if (!profile?.nameID) {
+          return done(new Error("SAML profile is missing nameID"));
+        }
+
+        // Process SSO profile and create/update user
+        const user = await this.processSSOProfile(
+          profile as SSOUserProfile,
+          provider.id,
+        );
+        return done(null, user);
+      } catch (error) {
+        return done(error as Error);
+      }
     };
 
     const strategy = new SamlStrategy(
       samlConfig as any,
-      (async (
-        profile: SamlProfile | null | undefined,
-        done: VerifiedCallback
-      ) => {
-        try {
-          if (!profile?.nameID) {
-            return done(new Error("SAML profile is missing nameID"));
-          }
-
-          // Process SSO profile and create/update user
-          const user = await this.processSSOProfile(
-            profile as SSOUserProfile,
-            provider.id,
-          );
-          return done(null, user);
-        } catch (error) {
-          return done(error as Error);
-        }
-      }) as any
+      verifySamlProfile as any,
+      verifySamlProfile as any,
     );
 
-    passport.use(`saml-${provider.id}`, strategy as unknown as passport.Strategy);
-    console.log(`[SSO] Configured SAML strategy for provider: ${provider.name}`);
+    passport.use(
+      `saml-${provider.id}`,
+      strategy as unknown as passport.Strategy,
+    );
+    console.log(
+      `[SSO] Configured SAML strategy for provider: ${provider.name}`,
+    );
   }
 
   /**
@@ -179,7 +188,7 @@ export class SSOService {
    */
   private async processSSOProfile(
     profile: SSOUserProfile,
-    providerId: string
+    providerId: string,
   ): Promise<Record<string, unknown>> {
     const client = await pool.connect();
 
@@ -189,7 +198,7 @@ export class SSOService {
       // Check if SSO user exists
       const ssoUserResult = await client.query(
         "SELECT * FROM sso_users WHERE provider_id = $1 AND sso_subject = $2",
-        [providerId, profile.nameID]
+        [providerId, profile.nameID],
       );
 
       let ssoUser: SSOUser;
@@ -205,11 +214,16 @@ export class SSOService {
           `UPDATE sso_users 
            SET sso_email = $1, sso_groups = $2, last_login_at = CURRENT_TIMESTAMP, is_active = true
            WHERE id = $3`,
-          [profile.email || null, profile.groups || [], ssoUser.id]
+          [profile.email || null, profile.groups || [], ssoUser.id],
         );
 
         // Sync groups to roles
-        await this.syncGroupsToRoles(client, userId, profile.groups || [], providerId);
+        await this.syncGroupsToRoles(
+          client,
+          userId,
+          profile.groups || [],
+          providerId,
+        );
 
         console.log(`[SSO] Updated existing SSO user: ${userId}`);
       } else {
@@ -222,7 +236,7 @@ export class SSOService {
           `INSERT INTO users (phone_number, kyc_level, sso_only, sso_provider_id)
            VALUES ($1, 'unverified', true, $2)
            RETURNING id`,
-          [phoneNumber, providerId]
+          [phoneNumber, providerId],
         );
 
         userId = userResult.rows[0].id;
@@ -232,13 +246,24 @@ export class SSOService {
           `INSERT INTO sso_users (user_id, provider_id, sso_subject, sso_email, sso_groups, last_login_at)
            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
            RETURNING *`,
-          [userId, providerId, profile.nameID, profile.email || null, profile.groups || []]
+          [
+            userId,
+            providerId,
+            profile.nameID,
+            profile.email || null,
+            profile.groups || [],
+          ],
         );
 
         ssoUser = ssoUserInsertResult.rows[0];
 
         // Assign role based on groups
-        await this.syncGroupsToRoles(client, userId, profile.groups || [], providerId);
+        await this.syncGroupsToRoles(
+          client,
+          userId,
+          profile.groups || [],
+          providerId,
+        );
 
         console.log(`[SSO] Created new SSO user: ${userId}`);
       }
@@ -255,7 +280,7 @@ export class SSOService {
             sso_email: profile.email,
             sso_groups: profile.groups,
           }),
-        ]
+        ],
       );
 
       await client.query("COMMIT");
@@ -285,7 +310,7 @@ export class SSOService {
     client: any,
     userId: string,
     groups: string[],
-    providerId: string
+    providerId: string,
   ): Promise<void> {
     if (groups.length === 0) {
       console.log(`[SSO] No groups to sync for user: ${userId}`);
@@ -298,7 +323,7 @@ export class SSOService {
        FROM sso_group_role_mappings sgrm
        JOIN roles r ON sgrm.role_id = r.id
        WHERE sgrm.provider_id = $1`,
-      [providerId]
+      [providerId],
     );
 
     const mappings: GroupRoleMapping[] = mappingsResult.rows;
@@ -312,7 +337,10 @@ export class SSOService {
 
     for (const priority of rolePriority) {
       for (const mapping of mappings) {
-        if (groups.includes(mapping.sso_group_name) && mapping.role_name === priority) {
+        if (
+          groups.includes(mapping.sso_group_name) &&
+          mapping.role_name === priority
+        ) {
           assignedRole = mapping.role_name;
           assignedRoleId = mapping.role_id;
           break;
@@ -324,7 +352,7 @@ export class SSOService {
     // If no mapping found, assign default 'user' role
     if (!assignedRole) {
       const defaultRoleResult = await client.query(
-        "SELECT id, name FROM roles WHERE name = 'user' LIMIT 1"
+        "SELECT id, name FROM roles WHERE name = 'user' LIMIT 1",
       );
       if (defaultRoleResult.rows.length > 0) {
         assignedRole = defaultRoleResult.rows[0].name;
@@ -351,11 +379,11 @@ export class SSOService {
             assigned_role: assignedRole,
             assigned_role_id: assignedRoleId,
           }),
-        ]
+        ],
       );
 
       console.log(
-        `[SSO] Synced groups to role for user ${userId}: ${assignedRole}`
+        `[SSO] Synced groups to role for user ${userId}: ${assignedRole}`,
       );
     }
   }
@@ -367,7 +395,9 @@ export class SSOService {
     const strategyRegistry = passport as unknown as {
       _strategy(name: string): unknown;
     };
-    return strategyRegistry._strategy(`saml-${providerId}`) as SamlStrategy | null;
+    return strategyRegistry._strategy(
+      `saml-${providerId}`,
+    ) as SamlStrategy | null;
   }
 
   /**
@@ -375,7 +405,7 @@ export class SSOService {
    */
   public async getActiveProviders(): Promise<SSOProvider[]> {
     const result = await pool.query(
-      "SELECT * FROM sso_providers WHERE is_active = true ORDER BY name"
+      "SELECT * FROM sso_providers WHERE is_active = true ORDER BY name",
     );
     return result.rows;
   }
@@ -383,10 +413,12 @@ export class SSOService {
   /**
    * Get SSO provider by ID
    */
-  public async getProviderById(providerId: string): Promise<SSOProvider | null> {
+  public async getProviderById(
+    providerId: string,
+  ): Promise<SSOProvider | null> {
     const result = await pool.query(
       "SELECT * FROM sso_providers WHERE id = $1",
-      [providerId]
+      [providerId],
     );
     return result.rows.length > 0 ? result.rows[0] : null;
   }
@@ -414,7 +446,7 @@ export class SSOService {
         config.issuer,
         config.cert,
         config.callbackUrl,
-      ]
+      ],
     );
 
     const provider = result.rows[0];
@@ -432,7 +464,7 @@ export class SSOService {
   public async addGroupRoleMapping(
     providerId: string,
     ssoGroupName: string,
-    roleId: string
+    roleId: string,
   ): Promise<void> {
     await pool.query(
       `INSERT INTO sso_group_role_mappings (provider_id, sso_group_name, role_id)
@@ -440,11 +472,11 @@ export class SSOService {
        ON CONFLICT (provider_id, sso_group_name) DO UPDATE SET
          role_id = EXCLUDED.role_id,
          updated_at = CURRENT_TIMESTAMP`,
-      [providerId, ssoGroupName, roleId]
+      [providerId, ssoGroupName, roleId],
     );
 
     console.log(
-      `[SSO] Added group-role mapping: ${ssoGroupName} -> ${roleId} for provider ${providerId}`
+      `[SSO] Added group-role mapping: ${ssoGroupName} -> ${roleId} for provider ${providerId}`,
     );
   }
 
@@ -453,29 +485,31 @@ export class SSOService {
    */
   public async removeGroupRoleMapping(
     providerId: string,
-    ssoGroupName: string
+    ssoGroupName: string,
   ): Promise<void> {
     await pool.query(
       "DELETE FROM sso_group_role_mappings WHERE provider_id = $1 AND sso_group_name = $2",
-      [providerId, ssoGroupName]
+      [providerId, ssoGroupName],
     );
 
     console.log(
-      `[SSO] Removed group-role mapping: ${ssoGroupName} for provider ${providerId}`
+      `[SSO] Removed group-role mapping: ${ssoGroupName} for provider ${providerId}`,
     );
   }
 
   /**
    * Get group-to-role mappings for a provider
    */
-  public async getGroupRoleMappings(providerId: string): Promise<GroupRoleMapping[]> {
+  public async getGroupRoleMappings(
+    providerId: string,
+  ): Promise<GroupRoleMapping[]> {
     const result = await pool.query(
       `SELECT sgrm.sso_group_name, r.name as role_name, r.id as role_id
        FROM sso_group_role_mappings sgrm
        JOIN roles r ON sgrm.role_id = r.id
        WHERE sgrm.provider_id = $1
        ORDER BY sgrm.sso_group_name`,
-      [providerId]
+      [providerId],
     );
     return result.rows;
   }
@@ -492,7 +526,7 @@ export class SSOService {
       // Get SSO user info
       const ssoUserResult = await client.query(
         "SELECT * FROM sso_users WHERE user_id = $1",
-        [userId]
+        [userId],
       );
 
       if (ssoUserResult.rows.length === 0) {
@@ -504,7 +538,7 @@ export class SSOService {
       // Deactivate SSO user
       await client.query(
         "UPDATE sso_users SET is_active = false WHERE user_id = $1",
-        [userId]
+        [userId],
       );
 
       // Log deactivation event
@@ -518,7 +552,7 @@ export class SSOService {
             reason,
             deactivated_at: new Date().toISOString(),
           }),
-        ]
+        ],
       );
 
       await client.query("COMMIT");
@@ -538,7 +572,7 @@ export class SSOService {
   public async isSSOOnlyUser(userId: string): Promise<boolean> {
     const result = await pool.query(
       "SELECT sso_only FROM users WHERE id = $1",
-      [userId]
+      [userId],
     );
     return result.rows.length > 0 && result.rows[0].sso_only === true;
   }
@@ -549,7 +583,7 @@ export class SSOService {
   public async getSSOUserByUserId(userId: string): Promise<SSOUser | null> {
     const result = await pool.query(
       "SELECT * FROM sso_users WHERE user_id = $1",
-      [userId]
+      [userId],
     );
     return result.rows.length > 0 ? result.rows[0] : null;
   }
@@ -557,10 +591,7 @@ export class SSOService {
   /**
    * Get SSO audit log for a user
    */
-  public async getAuditLog(
-    userId: string,
-    limit: number = 50
-  ): Promise<any[]> {
+  public async getAuditLog(userId: string, limit: number = 50): Promise<any[]> {
     const result = await pool.query(
       `SELECT sal.*, sp.name as provider_name
        FROM sso_audit_log sal
@@ -568,7 +599,7 @@ export class SSOService {
        WHERE sal.user_id = $1
        ORDER BY sal.created_at DESC
        LIMIT $2`,
-      [userId, limit]
+      [userId, limit],
     );
     return result.rows;
   }
@@ -579,7 +610,7 @@ export class SSOService {
   public async handleSAMLCallback(
     req: Request,
     res: Response,
-    providerId: string
+    providerId: string,
   ): Promise<void> {
     const strategy = this.getStrategy(providerId);
 
@@ -631,7 +662,7 @@ export class SSOService {
                 ssoSubject: user.ssoSubject,
                 sessionIndex: user.sessionIndex,
               }),
-              { EX: 3600 } // 1 hour TTL
+              { EX: 3600 }, // 1 hour TTL
             );
           }
 
@@ -652,7 +683,7 @@ export class SSOService {
             message: error instanceof Error ? error.message : "Unknown error",
           });
         }
-      }
+      },
     )(req, res);
   }
 }
@@ -744,57 +775,51 @@ export function createSSORouter(): Router {
    * GET /api/auth/sso/mappings/:providerId
    * Get group-to-role mappings for a provider (admin only)
    */
-  router.get(
-    "/mappings/:providerId",
-    async (req: Request, res: Response) => {
-      const { providerId } = req.params;
+  router.get("/mappings/:providerId", async (req: Request, res: Response) => {
+    const { providerId } = req.params;
 
-      try {
-        const mappings = await ssoService.getGroupRoleMappings(providerId);
-        res.json({ mappings });
-      } catch (error) {
-        console.error("[SSO] Error fetching mappings:", error);
-        res.status(500).json({
-          error: "Failed to fetch group-role mappings",
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
-      }
+    try {
+      const mappings = await ssoService.getGroupRoleMappings(providerId);
+      res.json({ mappings });
+    } catch (error) {
+      console.error("[SSO] Error fetching mappings:", error);
+      res.status(500).json({
+        error: "Failed to fetch group-role mappings",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
     }
-  );
+  });
 
   /**
    * POST /api/auth/sso/mappings/:providerId
    * Add group-to-role mapping (admin only)
    */
-  router.post(
-    "/mappings/:providerId",
-    async (req: Request, res: Response) => {
-      const { providerId } = req.params;
-      const { sso_group_name, role_id } = req.body;
+  router.post("/mappings/:providerId", async (req: Request, res: Response) => {
+    const { providerId } = req.params;
+    const { sso_group_name, role_id } = req.body;
 
-      if (!sso_group_name || !role_id) {
-        res.status(400).json({
-          error: "Missing required fields",
-          message: "sso_group_name and role_id are required",
-        });
-        return;
-      }
-
-      try {
-        await ssoService.addGroupRoleMapping(providerId, sso_group_name, role_id);
-        res.json({
-          message: "Group-role mapping added successfully",
-          mapping: { sso_group_name, role_id },
-        });
-      } catch (error) {
-        console.error("[SSO] Error adding mapping:", error);
-        res.status(500).json({
-          error: "Failed to add group-role mapping",
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
-      }
+    if (!sso_group_name || !role_id) {
+      res.status(400).json({
+        error: "Missing required fields",
+        message: "sso_group_name and role_id are required",
+      });
+      return;
     }
-  );
+
+    try {
+      await ssoService.addGroupRoleMapping(providerId, sso_group_name, role_id);
+      res.json({
+        message: "Group-role mapping added successfully",
+        mapping: { sso_group_name, role_id },
+      });
+    } catch (error) {
+      console.error("[SSO] Error adding mapping:", error);
+      res.status(500).json({
+        error: "Failed to add group-role mapping",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
 
   /**
    * DELETE /api/auth/sso/mappings/:providerId/:groupName
@@ -817,7 +842,7 @@ export function createSSORouter(): Router {
           message: error instanceof Error ? error.message : "Unknown error",
         });
       }
-    }
+    },
   );
 
   /**

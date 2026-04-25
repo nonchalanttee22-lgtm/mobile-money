@@ -14,6 +14,8 @@ import fs from "fs";
 import path from "path";
 import session from "express-session";
 import * as Sentry from "@sentry/node";
+import { register } from "prom-client";
+import { startStellarExporter } from "./services/stellarExporter";
 
 import {
   apiVersionMiddleware,
@@ -81,6 +83,7 @@ import { createSep10Router } from "./stellar/sep10";
 import tomlRouter from "./routes/toml";
 import feesRouter from "./routes/fees";
 import feeStrategiesRouter from "./routes/feeStrategies";
+import crossChainRouter from "./routes/crossChain";
 
 // 1. Import Sentry Middleware
 import { initSentry, sentryBreadcrumbMiddleware } from "./middleware/sentry";
@@ -361,11 +364,13 @@ app.use("/api/users", userRoutes);
 app.use("/api/kyc", createKYCRoutes(pool));
 app.use("/api/fees", feesRouter);
 app.use("/api/fee-strategies", feeStrategiesRouter);
+app.use("/api/cross-chain", crossChainRouter);
 
 // GDPR
 app.use("/api/gdpr", privacyRoutes);
 app.use("/api/developer", developerDashboardRoutes);
 app.use("/api/admin", requireAuth, adminRoutes);
+app.use("/api/admin/providers/status", requireAuth, providerStatusRouter);
 app.use("/api/admin/kyc-upgrades", requireAuth, kycTierUpgradeRoutes);
 app.use("/sep10", createSep10Router());
 app.use("/sep31", sep31Router);
@@ -373,6 +378,16 @@ app.use("/sep24", sep24Router);
 app.use("/sep38", sep38Router);
 app.use("/sep12", createSep12Router(pool));
 app.use("/.well-known/stellar.toml", tomlRouter);
+
+// Prometheus Metrics Scraper Endpoint
+app.get("/metrics", async (req: Request, res: Response) => {
+  try {
+    res.set("Content-Type", register.contentType);
+    res.end(await register.metrics());
+  } catch (ex) {
+    res.status(500).end(String(ex));
+  }
+});
 
 app.use(
   (
@@ -498,6 +513,9 @@ async function initializeRuntime(): Promise<void> {
   // Initialize background jobs and monitoring
   const { startJobs } = await import("./jobs/scheduler");
   startJobs();
+
+  // Initialize Prometheus Horizon Scraper
+  startStellarExporter();
 
   const { getQueueHealth, pauseQueueEndpoint, resumeQueueEndpoint } =
     await import("./queue/health");

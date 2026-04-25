@@ -7,6 +7,7 @@ import {
 import { executeWithCircuitBreaker } from "../../utils/circuitBreaker";
 import { pool } from "../../config/database";
 import { MonitoringService } from "../monitoringService";
+import { redisClient } from "../../config/redis";
 
 export type ProviderTransactionStatus =
   | "completed"
@@ -19,14 +20,27 @@ interface MobileMoneyProvider {
     phoneNumber: string,
     amount: string,
   ): Promise<{ success: boolean; data?: unknown; error?: unknown }>;
+
   sendPayout(
     phoneNumber: string,
     amount: string,
   ): Promise<{ success: boolean; data?: unknown; error?: unknown }>;
+
   getTransactionStatus?(
     referenceId: string,
   ): Promise<{ status: ProviderTransactionStatus }>;
+
+ 
+  getOperationalBalance?(): Promise<{
+    success: boolean;
+    data?: {
+      availableBalance: number;
+      currency: string;
+    };
+    error?: unknown;
+  }>;
 }
+
 
 interface ProviderExecutionResult {
   success: boolean;
@@ -356,4 +370,92 @@ export class MobileMoneyService {
 
     return stats;
   }
+
+  async getAllProviderBalances(): Promise<
+  {
+    provider: string;
+    balance: number | null;
+    currency: string | null;
+    status: "healthy" | "down";
+    lastUpdated: string;
+  }[]
+> {
+  const CACHE_TTL = parseInt(process.env.PROVIDER_BALANCE_CACHE_TTL || "60"); // seconds
+  const CACHE_KEY = "provider:balances";
+
+  // Try to get from cache first
+  try {
+    if (redisClient && redisClient.isOpen) {
+      const cached = await redisClient.get(CACHE_KEY);
+      if (cached) {
+        return JSON.parse(cached as string);
+      }
+    }
+  } catch (error) {
+    console.warn("Redis cache read failed, falling back to direct fetch:", error);
+  }
+
+  const providerKeys = ["mtn", "airtel", "orange"];
+
+  const results = await Promise.all(
+    providerKeys.map(async (key) => {
+      try {
+        const provider = await loadProvider(key);
+
+        // If provider does not support balance
+        if (!provider.getOperationalBalance) {
+          return {
+            provider: key,
+            balance: null,
+            currency: null,
+            status: "down" as const,
+            lastUpdated: new Date().toISOString(),
+          };
+        }
+
+        const res = await provider.getOperationalBalance();
+
+        // Handle the success/error response format
+        if (!res.success || !res.data) {
+          return {
+            provider: key,
+            balance: null,
+            currency: null,
+            status: "down" as const,
+            lastUpdated: new Date().toISOString(),
+          };
+        }
+
+        return {
+          provider: key,
+          balance: res.data.availableBalance,
+          currency: res.data.currency,
+          status: "healthy" as const,
+          lastUpdated: new Date().toISOString(),
+        };
+      } catch {
+        return {
+          provider: key,
+          balance: null,
+          currency: null,
+          status: "down" as const,
+          lastUpdated: new Date().toISOString(),
+        };
+      }
+    })
+  );
+
+  // Cache the results
+  try {
+    if (redisClient && redisClient.isOpen) {
+      await redisClient.setex(CACHE_KEY, CACHE_TTL, JSON.stringify(results));
+    }
+  } catch (error) {
+    console.warn("Redis cache write failed:", error);
+  }
+
+  return results;
+}
+
+
 }
