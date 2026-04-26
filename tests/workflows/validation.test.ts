@@ -516,6 +516,23 @@ describe("GitHub Actions Workflow Validation", () => {
       }
     });
 
+    it("should run Playwright e2e with an app-supported environment", () => {
+      const testJob = ciWorkflow.jobs.test;
+      expect(testJob).toBeDefined();
+
+      const playwrightStep = testJob.steps.find(
+        (step: any) => step.name === "Run Playwright e2e tests",
+      );
+
+      expect(playwrightStep).toBeDefined();
+      expect(playwrightStep["continue-on-error"]).toBeUndefined();
+      expect(playwrightStep.env).toBeDefined();
+      expect(playwrightStep.env.NODE_ENV).toBe("development");
+      expect(playwrightStep.env.NODE_ENV).not.toBe("test");
+      expect(playwrightStep.env.DATABASE_URL).toContain("test_db");
+      expect(playwrightStep.env.REDIS_URL).toContain("localhost:6379");
+    });
+
     it("should verify Codecov upload step is configured correctly", () => {
       const testJob = ciWorkflow.jobs.test;
       expect(testJob).toBeDefined();

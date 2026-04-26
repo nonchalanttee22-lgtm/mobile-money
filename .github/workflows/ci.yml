@@ -169,7 +169,7 @@ jobs:
           DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
           REDIS_URL: redis://localhost:6379
           STELLAR_ISSUER_SECRET: S-DUMMY-SECRET-KEY-FOR-TESTING-PURPOSES-ONLY
-          NODE_ENV: test
+          NODE_ENV: development
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6
