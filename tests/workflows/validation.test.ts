@@ -100,6 +100,67 @@ describe("GitHub Actions Workflow Validation", () => {
     });
   });
 
+  describe("Security Job Snyk Configuration", () => {
+    let ciWorkflow: any;
+    let ciContent: string;
+
+    beforeAll(() => {
+      ciContent = fs.readFileSync(ciWorkflowPath, "utf8");
+      ciWorkflow = yaml.load(ciContent);
+    });
+
+    it("should not hard-fail when SNYK_TOKEN is unavailable", () => {
+      expect(ciContent).not.toContain(
+        "SNYK_TOKEN secret is required for vulnerability scanning.",
+      );
+      expect(ciContent).toContain("::warning title=Snyk scan skipped::");
+
+      const securityJob = ciWorkflow.jobs.security;
+      const tokenCheckStep = securityJob.steps.find(
+        (step: any) => step.id === "snyk_token",
+      );
+
+      expect(tokenCheckStep).toBeDefined();
+      expect(tokenCheckStep.run).toContain("available=false");
+      expect(tokenCheckStep.run).toContain("$GITHUB_OUTPUT");
+    });
+
+    it("should always run npm audit and only run Snyk when the token is available", () => {
+      const securityJob = ciWorkflow.jobs.security;
+      const rootAuditStep = securityJob.steps.find(
+        (step: any) =>
+          step.name === "Run root npm audit for high vulnerabilities",
+      );
+      const bridgeAuditStep = securityJob.steps.find(
+        (step: any) =>
+          step.name ===
+          "Run bridge-starter-node npm audit for high vulnerabilities",
+      );
+      const snykSetupStep = securityJob.steps.find(
+        (step: any) => step.name === "Setup Snyk CLI",
+      );
+      const snykTestSteps = securityJob.steps.filter(
+        (step: any) => step.name && step.name.includes("Snyk test"),
+      );
+
+      expect(rootAuditStep).toBeDefined();
+      expect(rootAuditStep.if).toBeUndefined();
+      expect(bridgeAuditStep).toBeDefined();
+      expect(bridgeAuditStep.if).toBeUndefined();
+
+      expect(snykSetupStep).toBeDefined();
+      expect(snykSetupStep.if).toBe(
+        "steps.snyk_token.outputs.available == 'true'",
+      );
+
+      expect(snykTestSteps).toHaveLength(2);
+      for (const step of snykTestSteps) {
+        expect(step.if).toBe("steps.snyk_token.outputs.available == 'true'");
+        expect(step.env.SNYK_TOKEN).toContain("secrets.SNYK_TOKEN");
+      }
+    });
+  });
+
   describe("Job Dependencies Structure", () => {
     let ciWorkflow: any;
 
@@ -595,7 +656,9 @@ describe("GitHub Actions Workflow Validation", () => {
       );
 
       expect(notifyStep).toBeDefined();
-      expect(notifyStep.if).toBe("failure() && steps.check_secrets.outputs.credentials_available == 'true'");
+      expect(notifyStep.if).toBe(
+        "failure() && steps.check_secrets.outputs.credentials_available == 'true'",
+      );
 
       // Verify notification includes diagnostic information
       expect(notifyStep.run).toContain("logs");
