@@ -527,7 +527,7 @@ describe("GitHub Actions Workflow Validation", () => {
       expect(playwrightStep).toBeDefined();
       expect(playwrightStep["continue-on-error"]).toBeUndefined();
       expect(playwrightStep.env).toBeDefined();
-      expect(playwrightStep.env.NODE_ENV).toBe("development");
+      expect(playwrightStep.env.NODE_ENV).toBe("staging");
       expect(playwrightStep.env.NODE_ENV).not.toBe("test");
       expect(playwrightStep.env.DATABASE_URL).toContain("test_db");
       expect(playwrightStep.env.REDIS_URL).toContain("localhost:6379");
