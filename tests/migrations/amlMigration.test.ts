@@ -5,7 +5,7 @@ describe("AML root migration", () => {
   const migrationsDir = path.join(process.cwd(), "migrations");
   const amlMigrationPath = path.join(
     migrationsDir,
-    "20260423_create_aml_alerts_table.sql",
+    "008_create_aml_alerts_table.sql",
   );
 
   let migrationContent: string;
@@ -14,7 +14,7 @@ describe("AML root migration", () => {
     migrationContent = fs.readFileSync(amlMigrationPath, "utf8");
   });
 
-  it("should run before the transaction index migration", () => {
+  it("should run before the partition and transaction index migrations", () => {
     const migrationFiles = fs
       .readdirSync(migrationsDir)
       .filter(
@@ -23,13 +23,19 @@ describe("AML root migration", () => {
       .sort();
 
     const amlMigrationIndex = migrationFiles.indexOf(
-      "20260423_create_aml_alerts_table.sql",
+      "008_create_aml_alerts_table.sql",
     );
 
     expect(amlMigrationIndex).toBeGreaterThanOrEqual(0);
     expect(
+      migrationFiles.indexOf("009_partition_transactions.sql"),
+    ).toBeGreaterThanOrEqual(0);
+    expect(
       migrationFiles.indexOf("20260425_add_transaction_indexes.sql"),
     ).toBeGreaterThanOrEqual(0);
+    expect(amlMigrationIndex).toBeLessThan(
+      migrationFiles.indexOf("009_partition_transactions.sql"),
+    );
     expect(amlMigrationIndex).toBeLessThan(
       migrationFiles.indexOf("20260425_add_transaction_indexes.sql"),
     );
