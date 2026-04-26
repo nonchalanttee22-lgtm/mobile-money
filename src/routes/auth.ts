@@ -6,13 +6,17 @@ import { createOIDCRouter, initializeOIDCProviders } from '../auth/oidc';
 import { enforceSSOForEmployees } from '../middleware/ssoEnforcement';
 import { tokenController } from '../controllers/tokenController';
 import { authenticateToken } from '../middleware/auth';
-import { authenticateUser, createUser, getUserPermissions, User } from '../services/userService';
+import { authenticateUser, createUser, getUserPermissions, getUserByPhoneNumber, User } from '../services/userService';
+import { getLockoutStatus, recordFailedAttempt } from '../auth/lockout';
 import { verifyTOTPToken, verifyBackupCode, is2FAEnabled } from '../auth/2fa';
 import { evaluateAdminLoginAnomaly } from '../services/loginAnomaly';
 import { validateRequest } from '../middleware/validation';
 import { hashPassword } from '../utils/password';
 import { redisClient } from '../config/redis';
 import { TransactionModel } from '../models/transaction';
+import { EmailService } from '../services/email';
+
+const emailService = new EmailService();
 
 export const authRoutes = Router();
 
@@ -309,7 +313,7 @@ authRoutes.get('/me', authenticateToken, async (req: Request, res: Response) => 
       const cachedStats = await redisClient.get(cacheKey);
       if (cachedStats) {
         try {
-          balanceStats = JSON.parse(cachedStats);
+          balanceStats = JSON.parse(cachedStats.toString());
         } catch (e) {
           console.error("Error parsing cached balance stats", e);
         }

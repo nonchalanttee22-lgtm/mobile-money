@@ -64,7 +64,7 @@ export class LayeredCache {
       const raw = await redisClient.get(key);
       if (!raw) return null;
       
-      const parsed = JSON.parse(raw);
+      const parsed = JSON.parse(raw.toString());
       
       // Populate L1 for future fast access
       // We use the remaining TTL from Redis or a default
@@ -125,12 +125,13 @@ export class LayeredCache {
       try {
         const keys = await redisClient.keys(pattern);
         if (keys.length > 0) {
-          await redisClient.del(keys);
+          await redisClient.del(keys as string[]);
           
           // Propagate invalidation for each key
           for (const key of keys) {
-            l1.del(key);
-            await redisClient.publish(INVALIDATION_CHANNEL, key);
+            const keyStr = key.toString();
+            l1.del(keyStr);
+            await redisClient.publish(INVALIDATION_CHANNEL, keyStr);
           }
         }
       } catch (err) {
