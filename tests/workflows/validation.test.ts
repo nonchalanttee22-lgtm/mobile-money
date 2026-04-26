@@ -161,6 +161,44 @@ describe("GitHub Actions Workflow Validation", () => {
     });
   });
 
+  describe("SonarCloud Workflow Token Configuration", () => {
+    const sonarWorkflowPath = path.join(workflowsDir, "sonar.yml");
+    let sonarWorkflow: any;
+    let sonarContent: string;
+
+    beforeAll(() => {
+      sonarContent = fs.readFileSync(sonarWorkflowPath, "utf8");
+      sonarWorkflow = yaml.load(sonarContent);
+    });
+
+    it("should not hard-fail when SONAR_TOKEN is unavailable", () => {
+      expect(sonarContent).toContain(
+        "::warning title=SonarCloud scan skipped::",
+      );
+
+      const sonarJob = sonarWorkflow.jobs.sonarcloud;
+      const tokenCheckStep = sonarJob.steps.find(
+        (step: any) => step.id === "sonar_token",
+      );
+
+      expect(tokenCheckStep).toBeDefined();
+      expect(tokenCheckStep.run).toContain("available=false");
+      expect(tokenCheckStep.run).toContain("$GITHUB_OUTPUT");
+    });
+
+    it("should run SonarCloud scan only when the token is available", () => {
+      const sonarJob = sonarWorkflow.jobs.sonarcloud;
+      const scanStep = sonarJob.steps.find(
+        (step: any) => step.name === "SonarCloud Scan",
+      );
+
+      expect(scanStep).toBeDefined();
+      expect(scanStep.if).toBe("steps.sonar_token.outputs.available == 'true'");
+      expect(scanStep.env.SONAR_TOKEN).toContain("secrets.SONAR_TOKEN");
+      expect(scanStep.env.GITHUB_TOKEN).toContain("secrets.GITHUB_TOKEN");
+    });
+  });
+
   describe("Job Dependencies Structure", () => {
     let ciWorkflow: any;
 
