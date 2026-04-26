@@ -84,8 +84,10 @@ jest.mock("../../models/transaction", () => ({
 
 const { adminRoutes } = require("../admin");
 
+const documentId = "123e4567-e89b-42d3-a456-426614174000";
+
 const documentFixture = {
-  id: "doc-123",
+  id: documentId,
   title: "Ghana KYC rules",
   summary: "Local onboarding rules",
   body: "Collect national ID for regulated wallets.",
@@ -123,6 +125,17 @@ describe("Admin compliance knowledge base", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers["content-type"]).toContain("text/html");
+    expect(response.text).toContain("Compliance Knowledge Base");
+    expect(response.text).toContain("data-doc-id");
+    expect(response.text).not.toContain('onclick="openDoc');
+  });
+
+  it("allows compliance officers to serve the knowledge base page", async () => {
+    const response = await request(buildApp("compliance_officer")).get(
+      "/api/admin/compliance/knowledge-base",
+    );
+
+    expect(response.status).toBe(200);
     expect(response.text).toContain("Compliance Knowledge Base");
   });
 
@@ -219,24 +232,70 @@ describe("Admin compliance knowledge base", () => {
     });
 
     const response = await request(buildApp()).delete(
-      "/api/admin/compliance/docs/doc-123",
+      `/api/admin/compliance/docs/${documentId}`,
     );
 
     expect(response.status).toBe(200);
     expect(response.body.status).toBe("archived");
     expect(mockComplianceDocumentModel.archive).toHaveBeenCalledWith(
-      "doc-123",
+      documentId,
       "admin-123",
     );
   });
 
-  it("forbids non-admin users", async () => {
+  it("allows compliance officers to create compliance documents", async () => {
+    mockComplianceDocumentModel.create.mockResolvedValue(documentFixture);
+
     const response = await request(buildApp("compliance_officer"))
       .post("/api/admin/compliance/docs")
       .send({ title: "Rules", body: "Body" });
 
+    expect(response.status).toBe(201);
+    expect(mockComplianceDocumentModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Rules", body: "Body" }),
+      "admin-123",
+    );
+  });
+
+  it("forbids regular users from compliance knowledge base routes", async () => {
+    const response = await request(buildApp("support_agent"))
+      .post("/api/admin/compliance/docs")
+      .send({ title: "Rules", body: "Body" });
+
     expect(response.status).toBe(403);
-    expect(response.body.message).toBe("Admin access required");
+    expect(response.body.message).toBe(
+      "Compliance knowledge base access requires admin, super-admin, or compliance_officer role",
+    );
     expect(mockComplianceDocumentModel.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid document IDs before fetching documents", async () => {
+    const response = await request(buildApp()).get(
+      "/api/admin/compliance/docs/not-a-uuid",
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("Invalid compliance document id");
+    expect(mockComplianceDocumentModel.findById).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid document IDs before updating documents", async () => {
+    const response = await request(buildApp("compliance_officer"))
+      .patch("/api/admin/compliance/docs/not-a-uuid")
+      .send({ title: "Rules" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("Invalid compliance document id");
+    expect(mockComplianceDocumentModel.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid document IDs before archiving documents", async () => {
+    const response = await request(buildApp()).delete(
+      "/api/admin/compliance/docs/not-a-uuid",
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("Invalid compliance document id");
+    expect(mockComplianceDocumentModel.archive).not.toHaveBeenCalled();
   });
 });

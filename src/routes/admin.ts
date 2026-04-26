@@ -118,7 +118,15 @@ const complianceDocumentModel = new ComplianceDocumentModel();
 const isAdminRole = (role?: string) =>
   role === "admin" || role === "super-admin";
 
+const isComplianceKnowledgeBaseRole = (role?: string) =>
+  isAdminRole(role) || role === "compliance_officer";
+
 const isSuperAdminRole = (role?: string) => role === "super-admin";
+
+const isUuid = (value: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 
 const buildAuditContext = (req: Request) => {
   const authReq = req as AuthRequest;
@@ -158,6 +166,35 @@ const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
 
   if (!user || !isAdminRole(user.role)) {
     return res.status(403).json({ message: "Admin access required" });
+  }
+
+  next();
+};
+
+const requireComplianceKnowledgeBaseAccess = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  const user = (req as AuthRequest).user;
+
+  if (!user || !isComplianceKnowledgeBaseRole(user.role)) {
+    return res.status(403).json({
+      message:
+        "Compliance knowledge base access requires admin, super-admin, or compliance_officer role",
+    });
+  }
+
+  next();
+};
+
+const validateComplianceDocumentId = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  if (!isUuid(req.params.id)) {
+    return res.status(400).json({ message: "Invalid compliance document id" });
   }
 
   next();
@@ -2041,7 +2078,7 @@ const parsePositiveInt = (value: unknown, fallback: number, max?: number) => {
 
 router.get(
   "/compliance/knowledge-base",
-  requireAdmin,
+  requireComplianceKnowledgeBaseAccess,
   (_req: Request, res: Response) => {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(`<!DOCTYPE html>
@@ -2084,11 +2121,13 @@ function params(){const p = new URLSearchParams();['search','country','provider'
 function setMessage(text, cls){el('message').className = 'message ' + (cls || ''); el('message').textContent = text;}
 async function loadFacets(){const r = await fetch(api + '/facets', {credentials:'include'}); if(!r.ok) return; const f = await r.json(); fill('country', f.countries); fill('provider', f.providers); fill('tag', f.tags);}
 function fill(id, values){const first = el(id).options[0].outerHTML; el(id).innerHTML = first + (values || []).map(v => '<option value="' + esc(v) + '">' + esc(v) + '</option>').join('');}
-async function loadDocs(){const r = await fetch(api + '?' + params().toString(), {credentials:'include'}); const box = el('docs'); if(!r.ok){box.innerHTML='<div class="empty error">Failed to load documents</div>'; return;} const json = await r.json(); if(!json.data.length){box.innerHTML='<div class="empty">No documents found</div>'; return;} box.innerHTML = json.data.map(d => '<div class="doc" onclick="openDoc(\'' + d.id + '\')"><span class="status">' + esc(d.status) + '</span><h3>' + esc(d.title) + '</h3><div class="meta">' + esc(d.countryCode || 'Global') + ' · ' + esc(d.provider || 'Any provider') + '</div><div>' + (d.tags || []).map(t => '<span class="pill">' + esc(t) + '</span>').join('') + '</div></div>').join('');}
+async function loadDocs(){const r = await fetch(api + '?' + params().toString(), {credentials:'include'}); const box = el('docs'); if(!r.ok){box.innerHTML='<div class="empty error">Failed to load documents</div>'; return;} const json = await r.json(); if(!json.data.length){box.innerHTML='<div class="empty">No documents found</div>'; return;} box.innerHTML = json.data.map(d => '<div class="doc" data-doc-id="' + esc(d.id) + '" role="button" tabindex="0"><span class="status">' + esc(d.status) + '</span><h3>' + esc(d.title) + '</h3><div class="meta">' + esc(d.countryCode || 'Global') + ' · ' + esc(d.provider || 'Any provider') + '</div><div>' + (d.tags || []).map(t => '<span class="pill">' + esc(t) + '</span>').join('') + '</div></div>').join('');}
 async function openDoc(id){const r = await fetch(api + '/' + encodeURIComponent(id), {credentials:'include'}); if(!r.ok){setMessage('Document not found','error'); return;} const d = await r.json(); el('docId').value=d.id; el('title').value=d.title || ''; el('docStatus').value=d.status || 'published'; el('docCountry').value=d.countryCode || ''; el('docProvider').value=d.provider || ''; el('docTags').value=(d.tags || []).join(', '); el('sourceUrl').value=d.sourceUrl || ''; el('summary').value=d.summary || ''; el('body').value=d.body || ''; setMessage('Loaded document','');}
 async function saveDoc(){const id = el('docId').value; const payload = {title:el('title').value, status:el('docStatus').value, country:el('docCountry').value, provider:el('docProvider').value, tags:el('docTags').value, sourceUrl:el('sourceUrl').value, summary:el('summary').value, body:el('body').value}; const r = await fetch(id ? api + '/' + encodeURIComponent(id) : api, {method:id?'PATCH':'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body:JSON.stringify(payload)}); const json = await r.json().catch(()=>({})); if(!r.ok){setMessage(json.message || 'Save failed','error'); return;} setMessage('Saved','success'); el('docId').value=json.id; await loadFacets(); await loadDocs();}
 async function archiveDoc(){const id = el('docId').value; if(!id) return setMessage('Select a document first','error'); const r = await fetch(api + '/' + encodeURIComponent(id), {method:'DELETE', credentials:'include'}); if(!r.ok){setMessage('Archive failed','error'); return;} setMessage('Archived','success'); resetForm(); await loadFacets(); await loadDocs();}
 function resetForm(){['docId','title','docCountry','docProvider','docTags','sourceUrl','summary','body'].forEach(id=>el(id).value=''); el('docStatus').value='published';}
+el('docs').addEventListener('click', e => { const row = e.target.closest('[data-doc-id]'); if(row) openDoc(row.dataset.docId); });
+el('docs').addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ const row = e.target.closest('[data-doc-id]'); if(row){ e.preventDefault(); openDoc(row.dataset.docId); } } });
 ['country','provider','tag','status'].forEach(id => el(id).onchange = loadDocs); el('search').onkeydown = e => { if(e.key === 'Enter') loadDocs(); };
 loadFacets(); loadDocs();
 </script>
@@ -2099,7 +2138,7 @@ loadFacets(); loadDocs();
 
 router.get(
   "/compliance/docs",
-  requireAdmin,
+  requireComplianceKnowledgeBaseAccess,
   async (req: Request, res: Response) => {
     try {
       const page = parsePositiveInt(req.query.page, 1);
@@ -2139,7 +2178,7 @@ router.get(
 
 router.get(
   "/compliance/docs/facets",
-  requireAdmin,
+  requireComplianceKnowledgeBaseAccess,
   async (_req: Request, res: Response) => {
     try {
       res.json(await complianceDocumentModel.getFacets());
@@ -2154,7 +2193,8 @@ router.get(
 
 router.get(
   "/compliance/docs/:id",
-  requireAdmin,
+  requireComplianceKnowledgeBaseAccess,
+  validateComplianceDocumentId,
   async (req: Request, res: Response) => {
     try {
       const document = await complianceDocumentModel.findById(req.params.id);
@@ -2172,7 +2212,7 @@ router.get(
 
 router.post(
   "/compliance/docs",
-  requireAdmin,
+  requireComplianceKnowledgeBaseAccess,
   logAdminAction("CREATE_COMPLIANCE_DOCUMENT"),
   async (req: Request, res: Response) => {
     try {
@@ -2195,7 +2235,8 @@ router.post(
 
 router.patch(
   "/compliance/docs/:id",
-  requireAdmin,
+  requireComplianceKnowledgeBaseAccess,
+  validateComplianceDocumentId,
   logAdminAction("UPDATE_COMPLIANCE_DOCUMENT"),
   async (req: Request, res: Response) => {
     try {
@@ -2223,7 +2264,8 @@ router.patch(
 
 router.delete(
   "/compliance/docs/:id",
-  requireAdmin,
+  requireComplianceKnowledgeBaseAccess,
+  validateComplianceDocumentId,
   logAdminAction("ARCHIVE_COMPLIANCE_DOCUMENT"),
   async (req: Request, res: Response) => {
     try {
